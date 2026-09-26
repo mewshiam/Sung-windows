@@ -53,7 +53,7 @@ jobs:
           arch: win64_msvc2022_64
           # Multimedia is what plays the audio; the rest of the components
           # the build asks for ship in the base install.
-          modules: qt.multimedia
+          modules: qtmultimedia
           cache: true
 
       - name: Configure
