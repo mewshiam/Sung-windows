@@ -513,7 +513,7 @@ private slots:
     for(auto t:{a,next,slow,fail})b.enqueue(t);
     b.playAt(0);QTRY_VERIFY_WITH_TIMEOUT(b.playing()&&!b.resolving(),10000);
     const auto source=b.media()->source();QVERIFY(source.isLocalFile());const auto token=b.trackToken();
-    QVERIFY(!b.m_prepareTimer.isActive()||b.m_preparedData.isEmpty());
+    QVERIFY(!b.m_prepareTimer.isActive());
     b.seek(20000);QTRY_VERIFY_WITH_TIMEOUT(!b.m_preparedData.isEmpty(),5000);
     QVERIFY(QFileInfo::exists(source.toLocalFile()));QCOMPARE(b.trackToken(),token);QCOMPARE(b.media()->source(),source);
     const auto prepared=b.m_preparedData.value("file").toString();QVERIFY(QFileInfo::exists(prepared));
@@ -531,7 +531,11 @@ private slots:
     QTRY_COMPARE_WITH_TIMEOUT(b.m_preparedId,QString("prepare0004"),3000);QTest::qWait(600);QVERIFY(b.m_preparedData.isEmpty());QVERIFY(b.error().isEmpty());
     QCOMPARE(b.media()->source(),playing);QVERIFY(QFileInfo::exists(playing.toLocalFile()));
     b.moveQueue(3,2);QTRY_VERIFY_WITH_TIMEOUT(!b.m_preparedData.isEmpty(),5000);b.pause();QTRY_VERIFY(b.m_preparedId.isEmpty());QVERIFY(b.m_preparedData.isEmpty());
-    b.play();b.setShuffle(true);QTest::qWait(100);QVERIFY(b.m_preparedId.isEmpty());b.setShuffle(false);b.setSleep(-1);QTest::qWait(100);QVERIFY(b.m_preparedId.isEmpty());b.setSleep(0);
+    // Under shuffle the destination is drawn once and shared: the preparation
+    // aims at it, and the skip button lands on it. The draw is pinned here so
+    // the assertion is deterministic.
+    b.play();b.m_shuffleTarget=3;b.setShuffle(true);QTRY_VERIFY_WITH_TIMEOUT(b.m_preparedId==QString("prepare0004"),3000);QVERIFY(b.m_preparedData.isEmpty());QVERIFY(b.error().isEmpty());
+    b.setShuffle(false);QTRY_VERIFY_WITH_TIMEOUT(b.m_preparedId==QString("prepare0003"),5000);b.setSleep(-1);QTest::qWait(100);QVERIFY(b.m_preparedId.isEmpty());b.setSleep(0);
     b.setPrepareNext(false);QTest::qWait(100);QVERIFY(b.m_preparedId.isEmpty());
     // Import is associated with the song captured when the picker opened.
     QTemporaryDir files;QFile lrc(files.filePath("lyrics.lrc"));QVERIFY(lrc.open(QIODevice::WriteOnly));lrc.write("[00:01.00] First\n[00:03.00] Second");lrc.close();

@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.12.2");
+  app.setApplicationVersion("0.12.3");
   app.setDesktopFileName("sung");
 #ifdef Q_OS_WIN
   // The exe carries the icon in its resource script, but a running QML

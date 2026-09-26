@@ -76,7 +76,7 @@ Native rendering and bounded artwork caches keep Sung lightweight. Animations ca
 
 On first run Sung offers a three-step setup: theme and accent color, a music folder, and the page to open on. Every step can be skipped, and each control also lives in Settings.
 
-**YouTube.** Search from the capsule at the top of the window, or paste a song, album or playlist link. Playback controls, the queue (**Ctrl+L**) and the immersive player (**F11**) are one click away. Streaming quality and offline keeping are under **Settings → Privacy & data**.
+**YouTube.** Search from the capsule at the top of the window, or paste a song, album or playlist link. Playback controls, the queue (**Ctrl+L**) and the immersive player (**F11**) are one click away. Streaming quality and offline keeping are under **Settings → Privacy & data**. The next queued song is prepared while the current one plays — starting the moment the song begins rather than in its final minute, and under shuffle too, where the next song is drawn in advance — so skipping and song changes start at once.
 
 **Local files.** Use **Library → Local files → +** to import files, or **Folders → Add folder…** for a whole music folder (subfolders are scanned recursively and updates are watched while Sung runs). Local and YouTube songs mix freely in the same playlists.
 

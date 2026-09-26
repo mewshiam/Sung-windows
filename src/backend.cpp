@@ -921,6 +921,15 @@ void Backend::next() {
   if (m_queue.count() == 0)
     return;
   if (shuffle() && m_queue.count() > 1) {
+    // The destination was drawn when preparation started, so the skip lands
+    // on the song that is already on disk; the draw is consumed here and a
+    // fresh one is made for the song that is about to play.
+    const int target=shuffleDestination();
+    m_shuffleTarget=-1;
+    if(target>=0){
+      playAt(target,1);
+      return;
+    }
     int i = m_index;
     while (i == m_index)
       i = QRandomGenerator::global()->bounded(m_queue.count());
@@ -2133,24 +2142,40 @@ void Backend::setPrepareNext(bool enabled){m_settings.setValue("prepareNext",ena
 void Backend::cancelPreparation(){
   ++m_preparationGeneration;cancel("prepare");m_prepareTimer.stop();m_preparedData.clear();m_preparedDirectory.reset();m_preparedId.clear();
 }
+// Under shuffle the next song is drawn once and kept, so the preparation, the
+// handover and the skip button all aim at the same song. The draw is redrawn
+// when it points at the playing song or outside the queue.
+int Backend::shuffleDestination() {
+  if(m_queue.count()<2)return -1;
+  if(m_shuffleTarget<0||m_shuffleTarget>=m_queue.count()||m_shuffleTarget==m_index){
+    int i=m_index,guard=0;
+    while(i==m_index&&++guard<64)i=QRandomGenerator::global()->bounded(m_queue.count());
+    m_shuffleTarget=i==m_index?-1:i;
+  }
+  return m_shuffleTarget;
+}
 void Backend::updatePreparation(){
   m_prepareTimer.stop();
   QString nextId;
-  if(prepareNext()&&playing()&&m_wantPlay&&!m_resolving&&!shuffle()&&repeat()!=2&&!m_sleepAtEnd&&m_index>=0){
-    const int next=m_index+1<m_queue.count()?m_index+1:repeat()==1?0:-1;
-    // A song already kept needs no head start: it is a local file by the time
-    // playback reaches it, and fetching it again would undo the point of
-    // keeping it.
+  if(prepareNext()&&playing()&&m_wantPlay&&!m_resolving&&repeat()!=2&&!m_sleepAtEnd&&m_index>=0){
+    // The next song is decided the way playback will actually decide it: in
+    // sequence, or under shuffle by the destination drawn in advance, so the
+    // head start and the transition aim at the same song. A song already kept
+    // needs no head start: it is a local file by the time playback reaches
+    // it, and fetching it again would undo the point of keeping it.
+    const int next=shuffle()?shuffleDestination()
+      :m_index+1<m_queue.count()?m_index+1:repeat()==1?0:-1;
     if(next>=0&&next!=m_index&&!m_offline.has(OfflineStore::keyFor(m_queue.get(next),streamingQuality())))
       nextId=m_queue.get(next).value("videoId").toString();
     if(m_sleepTimer.isActive()&&m_sleepTimer.remainingTime()<qMax<qint64>(0,duration()-position())/playbackRate())nextId.clear();
   }
   if(nextId.isEmpty()){cancelPreparation();m_preparationAttempt.clear();return;}
-  if(m_preparedId!=nextId){cancelPreparation();m_preparationAttempt.clear();m_preparedId=nextId;}
+  if(m_preparedId!=nextId){cancelPreparation();m_preparationAttempt.clear();m_preparedId=nextId;m_preparationFailures=0;}
   if(!m_preparedData.isEmpty()||m_processes.contains("prepare")||m_preparationAttempt==nextId)return;
-  const qint64 remaining=(duration()-position())/playbackRate();
   if(duration()<=0)return;
-  if(remaining>45000){m_prepareTimer.start(int(qMin<qint64>(remaining-45000,2147483647)));return;}
+  // The head start begins as soon as the current song is playing rather than
+  // waiting for its final minute: the download runs beside the playing track
+  // either way, so a skip or an early end finds the song already on disk.
   m_preparationAttempt=nextId;const auto generation=m_preparationGeneration;
   auto directory=audioDirectory();if(!directory||!directory->isValid())return;
   m_preparedDirectory=directory;
@@ -2167,6 +2192,13 @@ void Backend::updatePreparation(){
 #ifdef Q_OS_UNIX
       QFile buffered(file.filePath());if(buffered.open(QIODevice::ReadOnly))::posix_fadvise(buffered.handle(),0,0,POSIX_FADV_DONTNEED);
 #endif
+    }
+    else if(!data.value("ok").toBool()){
+      // A failed look-up is retried twice before the preparation gives up and
+      // leaves the transition to the ordinary path.
+      ++m_preparationFailures;m_preparationAttempt.clear();
+      if(m_preparationFailures<3)m_prepareTimer.start(60000);
+      m_preparedDirectory.reset();
     }
     else m_preparedDirectory.reset();
   },directory);
@@ -2693,11 +2725,7 @@ void Backend::setGapless(bool enabled) {
 // because the deck has to be loaded with a decision already made.
 int Backend::handoffTarget() {
   if(m_queue.count()<2 || repeat()==2)return -1;
-  if(shuffle()){
-    int i=m_index,guard=0;
-    while(i==m_index && ++guard<64)i=QRandomGenerator::global()->bounded(m_queue.count());
-    return i==m_index?-1:i;
-  }
+  if(shuffle())return shuffleDestination();
   if(m_index+1<m_queue.count())return m_index+1;
   if(repeat()==1)return 0;
   return -1;

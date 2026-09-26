@@ -747,6 +747,7 @@ private:
   QVariantList m_sessions;
   void request(const QString &channel, QVariantMap args, Callback done, std::shared_ptr<QTemporaryDir> lifetime = {});
   void updatePreparation();
+  int shuffleDestination();
   void importNextLocalBatch();
   void mergeLocalTrack(QVariantMap track);
   void scanMusicFolders(const QStringList &folders);
@@ -833,6 +834,7 @@ private:
   std::shared_ptr<QTemporaryDir> m_audioCache, m_preparedDirectory;
   QVariantMap m_preparedData;
   QString m_preparedId, m_preparationAttempt;
+  int m_shuffleTarget = -1, m_preparationFailures = 0;
   quint64 m_preparationGeneration=0;
   QTimer m_prepareTimer, m_prepareUpdate;
   QString m_lyricsSource;
