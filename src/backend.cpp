@@ -2153,7 +2153,13 @@ void Backend::updatePreparation(){
     // Preload failures and oversized/direct streams leave normal playback in charge.
     if(data.value("ok").toBool()&&file.isFile()&&file.size()<=32*1024*1024&&file.canonicalPath()==QFileInfo(directory->path()).canonicalFilePath()){
       m_preparedData=data;
+      // Hand the freshly written pages back to the kernel instead of leaving
+      // the buffered temporary pinned in memory; nothing equivalent exists on
+      // Windows, where the cache pressure this answers does not arise the
+      // same way.
+#ifdef Q_OS_UNIX
       QFile buffered(file.filePath());if(buffered.open(QIODevice::ReadOnly))::posix_fadvise(buffered.handle(),0,0,POSIX_FADV_DONTNEED);
+#endif
     }
     else m_preparedDirectory.reset();
   },directory);
