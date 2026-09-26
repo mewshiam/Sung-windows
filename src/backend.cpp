@@ -22,6 +22,9 @@
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QNetworkReply>
+#include <QNetworkProxy>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -90,7 +93,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   connect(&m_sleepFadeStart,&QTimer::timeout,this,[this]{updateSleepGain();m_sleepFadeTick.start();});
   connect(&m_sleepFadeTick,&QTimer::timeout,this,&Backend::updateSleepGain);
   eachDeck([this](QMediaPlayer *deck){
-    connect(deck,&QMediaPlayer::positionChanged,this,[this,deck]{if(!isActive(*deck))return;if(m_sleepAtEnd)updateSleepGain();considerCrossfade();considerScrobble();});
+    connect(deck,&QMediaPlayer::positionChanged,this,[this,deck]{if(!isActive(*deck))return;if(m_sleepAtEnd)updateSleepGain();considerCrossfade();considerScrobble();considerSponsorSkip();});
     connect(deck,&QMediaPlayer::playbackRateChanged,this,[this,deck]{if(isActive(*deck)&&m_sleepAtEnd)updateSleepGain();});
   });
   m_sleepTick.setInterval(60000);
@@ -200,8 +203,12 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   m_onlineArtworkTimer.setInterval(1000);
   connect(&m_onlineArtworkTimer,&QTimer::timeout,this,&Backend::fetchOnlineArtwork);
   connect(this,&Backend::trackChanged,this,[this]{updateOnlineArtwork();emit onlineArtworkChanged();});
+  connect(this,&Backend::trackChanged,this,&Backend::fetchSkipSegments);
+  connect(this,&Backend::trackChanged,this,&Backend::updateDiscordPresence);
+  connect(this,&Backend::playbackChanged,this,&Backend::updateDiscordPresence);
   connect(this,&Backend::playbackChanged,this,&Backend::updateOnlineArtwork);
   connect(this,&Backend::settingsChanged,this,&Backend::updateOnlineArtwork);
+  m_discord.setEnabled(discordPresence());
   m_prepareTimer.setSingleShot(true); m_prepareUpdate.setSingleShot(true);
   connect(&m_prepareTimer,&QTimer::timeout,this,&Backend::updatePreparation);
   connect(&m_prepareUpdate,&QTimer::timeout,this,&Backend::updatePreparation);
@@ -221,6 +228,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 Backend::~Backend() {
   m_portMonitor.kill();m_portProbe.kill();m_portMonitor.waitForFinished(500);m_portProbe.waitForFinished(500);
   m_notifier.clear();
+  m_discord.clear();
   storeResumePosition();
   storeMeasuredLoudness();
   save();
@@ -248,6 +256,10 @@ void Backend::cancel(const QString &channel) {
 }
 void Backend::request(const QString &channel, QVariantMap args, Callback done, std::shared_ptr<QTemporaryDir> lifetime) {
   cancel(channel);
+  // Everything the helper reaches for - YouTube Music, yt-dlp, lyrics,
+  // artwork - goes through the proxy when one is set.
+  const QString proxy = proxyUrl();
+  if (!proxy.isEmpty()) args.insert("proxy", proxy);
   auto p = new QProcess(this);
   // Keep the unique directory alive until the worker has actually exited, even
   // when cancel() disconnects the backend callback while killing its process group.

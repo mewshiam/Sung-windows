@@ -74,7 +74,7 @@ def lyric_fallback(req):
     """Conservative exact lookup; never guess a live/remix version from its title."""
     import unicodedata
     from urllib.parse import urlencode
-    from urllib.request import Request, urlopen
+    from urllib.request import Request, build_opener, ProxyHandler
     from urllib.error import HTTPError
     from pathlib import Path
     import time
@@ -93,8 +93,11 @@ def lyric_fallback(req):
     params = dict(track_name=title, artist_name=artist, duration=duration)
     if req.get('album'): params['album_name'] = req['album']
     request = Request('https://lrclib.net/api/get?' + urlencode(params), headers={'User-Agent': 'Sung/0.11.0 (native Linux music client)', 'Accept': 'application/json'})
+    # An explicit proxy replaces the environment's idea of where to connect.
+    proxy = str(req.get('proxy') or '').strip()
+    opener = build_opener(ProxyHandler({'http': proxy, 'https': proxy})) if proxy else build_opener()
     try:
-        with urlopen(request, timeout=8) as response:
+        with opener.open(request, timeout=8) as response:
             raw = response.read(1048577)
             if len(raw) > 1048576: return None
             data = json.loads(raw)
@@ -346,6 +349,10 @@ def audio_format(quality, fallback=False):
 
 def run(req):
     op = req.get('op', '')
+    # Requests that must leave through a particular door all take this from
+    # the C++ side: yt-dlp's proxy option, ytmusicapi's session, and the
+    # lyric lookup's opener. Empty means connect directly.
+    proxy = str(req.get('proxy') or '').strip()
     if op == 'choose-artwork':
         from pathlib import Path
         cover = Path(req.get('path',''))
@@ -373,6 +380,7 @@ def run(req):
                 'format': audio_format(req.get('quality', 'standard'), req.get('fallback')), 'socket_timeout': 18,
                 'retries': 2, 'extractor_retries': 2, 'cachedir': False,
                 'js_runtimes': {'node': {}}, 'skip_download': True}
+        if proxy: opts['proxy'] = proxy
         if req.get('cookies'):
             opts['cookiefile'] = req['cookies']
         if op == 'buffer':
@@ -401,6 +409,8 @@ def run(req):
         return {'url': info['url'], 'headers': info.get('http_headers', {}), 'seconds': info.get('duration', 0)}
     from ytmusicapi import YTMusic
     api = YTMusic(requests_session=True)
+    if proxy:
+        api._session.proxies = {'http': proxy, 'https': proxy}
     # Bound network calls; outer C++ watchdog also terminates stalled operations.
     api._session.request = _timeout_request(api._session.request, 8 if op == 'lyrics' else 20)
     if op == 'home':

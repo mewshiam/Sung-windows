@@ -20,8 +20,10 @@
 #include "musicserver.h"
 #include "offlinestore.h"
 #include "scrobbler.h"
+#include "discord.h"
 #include <QElapsedTimer>
 #include <QFileSystemWatcher>
+#include <QNetworkAccessManager>
 
 class Entries : public QAbstractListModel {
   Q_OBJECT
@@ -461,6 +463,22 @@ public:
   void setOnboarded(bool done) {if(onboarded()==done)return;m_settings.setValue("onboarded",done);emit settingsChanged();}
   bool backdropPulse() const {return m_settings.value("backdropPulse",true).toBool();}
   void setBackdropPulse(bool enabled) {if(backdropPulse()==enabled)return;m_settings.setValue("backdropPulse",enabled);emit settingsChanged();}
+  // Outbound traffic honours this proxy when one is set: the helper's requests
+  // (YouTube Music, yt-dlp, lyric and artwork lookups) and the SponsorBlock
+  // lookup alike. Empty means connect directly.
+  Q_PROPERTY(QString proxyUrl READ proxyUrl WRITE setProxyUrl NOTIFY settingsChanged)
+  QString proxyUrl() const {return m_settings.value("network/proxy").toString();}
+  void setProxyUrl(const QString &url) {const QString trimmed=url.trimmed();if(proxyUrl()==trimmed)return;m_settings.setValue("network/proxy",trimmed);emit settingsChanged();}
+  // Community timings for what is an advert and what is not, sent to
+  // sponsor.ajay.app under the track's video ID when this is on.
+  Q_PROPERTY(bool sponsorBlock READ sponsorBlock WRITE setSponsorBlock NOTIFY settingsChanged)
+  bool sponsorBlock() const {return m_settings.value("sponsorBlock",false).toBool();}
+  void setSponsorBlock(bool enabled) {if(sponsorBlock()==enabled)return;m_settings.setValue("sponsorBlock",enabled);if(!enabled){m_skipSegments.clear();m_skipVideo.clear();}emit settingsChanged();}
+  // Mirrors the song playing onto the user's Discord profile through
+  // Discord's local IPC socket.
+  Q_PROPERTY(bool discordPresence READ discordPresence WRITE setDiscordPresence NOTIFY settingsChanged)
+  bool discordPresence() const {return m_settings.value("discordPresence",false).toBool();}
+  void setDiscordPresence(bool enabled) {if(discordPresence()==enabled)return;m_settings.setValue("discordPresence",enabled);m_discord.setEnabled(enabled);if(enabled)updateDiscordPresence();emit settingsChanged();}
   bool typeAheadJump() const {return m_settings.value("typeAheadJump",true).toBool();}
   void setTypeAheadJump(bool enabled) {if(typeAheadJump()==enabled)return;m_settings.setValue("typeAheadJump",enabled);emit settingsChanged();}
   Q_INVOKABLE QString preparePlaylistCover(const QUrl &url);
@@ -868,6 +886,9 @@ private:
   double m_fadeGain = 1.0;
   quint64 m_crossfadeToken = 0;
   void considerCrossfade();
+  void fetchSkipSegments();
+  void considerSponsorSkip();
+  void updateDiscordPresence();
   void beginCrossfade(int milliseconds,int target);
   void stepCrossfade();
   void endCrossfade(bool completed);
@@ -915,4 +936,11 @@ private:
   bool m_uiActive = true;
   int m_notifiedLyricIndex = -1;
   QTimer m_positionTick;
+  // SponsorBlock timings for the track whose video ID sits in m_skipVideo.
+  QNetworkAccessManager m_sponsorNetwork;
+  QVector<QPair<qint64,qint64>> m_skipSegments;
+  QString m_skipVideo;
+  // Guards against the seek a skip performs feeding straight back into one.
+  QElapsedTimer m_skipGuard;
+  DiscordPresence m_discord;
 };

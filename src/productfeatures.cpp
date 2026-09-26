@@ -7,6 +7,12 @@
 #include <QDateTime>
 #include <QHash>
 #include <QLocale>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QNetworkProxy>
+#include <QUrlQuery>
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -652,4 +658,104 @@ void Backend::considerScrobble() {
   if(position()<m_scrobbleThreshold)return;
   m_scrobbleSent=true;
   m_scrobbler.submit(current(),m_scrobbleStartedAt);
+}
+
+// --- Community skips and presence --------------------------------------------
+//
+// SponsorBlock collects, per video, the stretches listeners agreed to skip:
+// sponsor reads, self-promotion, long intros. Asking costs one request whose
+// only payload is the track's video ID, sent to sponsor.ajay.app. The timings
+// that come back are merged where they overlap, then watched while the song
+// plays; when the needle crosses into one, playback jumps past its end.
+//
+// Discord Rich Presence paints the same "listening to" line the apps that
+// speak Discord's local pipe do. The connection is Discord's own, on the same
+// machine, and carries nothing beyond the song's title, artist, artwork and
+// a button back to the track.
+
+void Backend::fetchSkipSegments() {
+  m_skipSegments.clear();
+  m_skipGuard.invalidate();
+  const auto track = current();
+  const QString video = track.value("videoId").toString();
+  m_skipVideo = video;
+  // Timings only exist for YouTube tracks; local files and music servers
+  // have no video to ask about.
+  if (!sponsorBlock() || video.isEmpty() || track.value("localPath").toString().length()>0) return;
+  QNetworkProxy proxy;
+  if (!proxyUrl().isEmpty()) {
+    const QUrl parsed(proxyUrl());
+    proxy.setType(parsed.scheme().startsWith("socks") ? QNetworkProxy::Socks5Proxy
+                                                      : QNetworkProxy::HttpProxy);
+    proxy.setHostName(parsed.host());
+    proxy.setPort(parsed.port(8080));
+    if (!parsed.userName().isEmpty()) proxy.setUser(parsed.userName());
+    if (!parsed.password().isEmpty()) proxy.setPassword(parsed.password());
+    m_sponsorNetwork.setProxy(proxy);
+  } else m_sponsorNetwork.setProxy(QNetworkProxy());
+  QUrl url("https://sponsor.ajay.app/api/skipSegments");
+  QUrlQuery query;
+  query.addQueryItem("videoID", video);
+  // The same six categories Pear Desktop's plugin asks for.
+  QJsonArray categories = {"sponsor", "intro", "outro", "interaction", "selfpromo", "music_offtopic"};
+  query.addQueryItem("categories", QString::fromUtf8(QJsonDocument(categories).toJson(QJsonDocument::Compact)));
+  url.setQuery(query);
+  QNetworkRequest request(url);
+  request.setTransferTimeout(8000);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+  auto *reply = m_sponsorNetwork.get(request);
+  connect(reply, &QNetworkReply::finished, this, [this, reply, video] {
+    reply->deleteLater();
+    if (m_skipVideo != video || !sponsorBlock()) return;
+    if (reply->error() != QNetworkReply::NoError) return;
+    const auto doc = QJsonDocument::fromJson(reply->readAll());
+    if (!doc.isArray()) return;
+    QVector<QPair<qint64, qint64>> segments;
+    for (const auto &entry : doc.array()) {
+      const auto span = entry.toObject().value("segment").toArray();
+      if (span.size() != 2) continue;
+      const qint64 start = qRound(span.at(0).toDouble() * 1000.0);
+      const qint64 end = qRound(span.at(1).toDouble() * 1000.0);
+      if (end <= start) continue;
+      segments.append({start, end});
+    }
+    // Overlapping submissions describe one stretch together; merge them the
+    // way the SponsorBlock consumers do so a single seek clears the lot.
+    std::sort(segments.begin(), segments.end());
+    QVector<QPair<qint64, qint64>> merged;
+    for (const auto &segment : segments) {
+      if (!merged.isEmpty() && merged.last().second >= segment.first)
+        merged.last().second = qMax(merged.last().second, segment.second);
+      else
+        merged.append(segment);
+    }
+    m_skipSegments = merged;
+    // A segment may already be under the needle by the time the answer lands.
+    considerSponsorSkip();
+  });
+}
+
+void Backend::considerSponsorSkip() {
+  if (!sponsorBlock() || m_skipSegments.isEmpty()) return;
+  // A seek just performed, by a skip or by the listener, has not yet been
+  // reflected in the position the deck reports; wait it out rather than
+  // fighting over the needle.
+  if (m_skipGuard.isValid() && m_skipGuard.elapsed() < 1200) return;
+  const qint64 at = m_media().position();
+  for (const auto &segment : m_skipSegments) {
+    // The tail margin keeps a report from the end of the segment itself
+    // from dragging the seek back.
+    if (at >= segment.first && at < segment.second - 400) {
+      m_skipGuard.start();
+      seek(segment.second);
+      return;
+    }
+  }
+}
+
+void Backend::updateDiscordPresence() {
+  if (!discordPresence()) return;
+  const auto track = current();
+  if (track.isEmpty() || track.value("title").toString().isEmpty()) { m_discord.clear(); return; }
+  m_discord.update(track, playing(), position(), duration());
 }
