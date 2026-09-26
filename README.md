@@ -69,6 +69,10 @@ Install the equivalent development packages for **Qt 6.8+** (Core, Gui, Quick, Q
 
 Sung uses Google Sans Flex when installed and otherwise falls back to a system font. Noctalia is optional.
 
+### Windows
+
+Sung builds on Windows as a portable, self-contained zip (Qt, an embedded Python runtime for the YouTube helper and ffmpeg all ship inside it). The build runs on GitHub Actions and produces a downloadable `Sung-windows-x64` artifact on every push — see [WINDOWS_BUILD.md](WINDOWS_BUILD.md) for the artifact, the local build recipe, and the current feature notes on Windows (media-key integration is pending; everything else works, no installer needed).
+
 ## Getting started
 
 ### Music library

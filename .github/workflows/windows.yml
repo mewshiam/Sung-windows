@@ -1,0 +1,168 @@
+# Builds Sung for Windows and packages it as a portable zip.
+#
+# The zip needs no installation: unpack it anywhere and run Sung\bin\sung.exe.
+# It carries Qt, the MSVC runtime, an embedded Python for the YouTube helper
+# and (optionally) ffmpeg for animated artwork, all next to the executable.
+#
+# Every push and pull request produces a downloadable artifact; a tag push
+# also attaches the zip to a GitHub release.
+name: Windows build
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_ffmpeg:
+        description: "Bundle ffmpeg for animated artwork (adds ~100 MB)"
+        type: boolean
+        default: true
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.10.3"
+  PYTHON_VERSION: "3.12.10"
+
+jobs:
+  windows:
+    name: Windows x64 portable zip
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Stage the portable layout
+        run: |
+          New-Item -ItemType Directory -Force -Path stage\Sung\bin, stage\Sung\helper | Out-Null
+          Copy-Item build\sung.exe stage\Sung\bin\
+          Copy-Item helper\catalog.py, helper\online_artwork.py, helper\requirements.txt stage\Sung\helper\
+          Copy-Item LICENSE, NOTICE stage\Sung\
+          Copy-Item licenses stage\Sung\licenses -Recurse
+          Copy-Item WINDOWS_BUILD.md stage\Sung\README-WINDOWS.md
+
+      - name: Deploy Qt next to the executable
+        run: |
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" `
+            --release `
+            --no-translations `
+            --no-system-d3d-compiler `
+            --no-opengl-sw `
+            --dir stage\Sung\bin `
+            --plugindir stage\Sung\bin\plugins `
+            --qml-deploy-dir stage\Sung\bin\qml `
+            --qmldir qml `
+            stage\Sung\bin\sung.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+      - name: Pin the runtime paths with qt.conf
+        run: |
+          @'
+          [Paths]
+          Prefix = .
+          Plugins = plugins
+          Qml = qml
+          '@ | Set-Content stage\Sung\bin\qt.conf -Encoding ascii
+
+      - name: Bundle the MSVC runtime
+        run: |
+          Copy-Item C:\Windows\System32\msvcp140.dll, `
+                    C:\Windows\System32\vcruntime140.dll, `
+                    C:\Windows\System32\vcruntime140_1.dll `
+                    stage\Sung\bin\
+
+      - name: Bundle ffmpeg and ffprobe
+        if: ${{ inputs.include_ffmpeg != false }}
+        run: |
+          Invoke-WebRequest `
+            "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip" `
+            -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
+          Copy-Item ffmpeg-tmp\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe, `
+                    ffmpeg-tmp\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe `
+                    stage\Sung\bin\
+
+      # The embeddable interpreter keeps the helper's dependencies off the
+      # user's machine entirely: no system Python, no pip run by hand.
+      - name: Bundle the embedded Python helper
+        run: |
+          Invoke-WebRequest `
+            "https://www.python.org/ftp/python/$env:PYTHON_VERSION/python-$env:PYTHON_VERSION-embed-amd64.zip" `
+            -OutFile python-embed.zip
+          Expand-Archive python-embed.zip -DestinationPath stage\Sung\runtime
+          # Open the embedded interpreter to pip and site-packages.
+          $pth = Get-ChildItem stage\Sung\runtime\python*._pth | Select-Object -First 1
+          @'
+          python312.zip
+          .
+          Lib\site-packages
+          import site
+          '@ | Set-Content $pth.FullName -Encoding ascii
+          Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
+          stage\Sung\runtime\python.exe get-pip.py --no-warn-script-location
+          stage\Sung\runtime\python.exe -m pip install --no-warn-script-location -r stage\Sung\helper\requirements.txt
+          Remove-Item get-pip.py, python-embed.zip
+
+      - name: Verify the package
+        run: |
+          $required = @(
+            "stage\Sung\bin\sung.exe",
+            "stage\Sung\bin\qt.conf",
+            "stage\Sung\bin\Qt6Core.dll",
+            "stage\Sung\bin\platforms\qwindows.dll",
+            "stage\Sung\bin\qml\QtQuick",
+            "stage\Sung\bin\msvcp140.dll",
+            "stage\Sung\helper\catalog.py",
+            "stage\Sung\helper\online_artwork.py",
+            "stage\Sung\runtime\python.exe",
+            "stage\Sung\runtime\Lib\site-packages\yt_dlp",
+            "stage\Sung\runtime\Lib\site-packages\ytmusicapi"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing from the package: $path" }
+          }
+          Get-ChildItem stage\Sung | Select-Object Name
+          "Package size: {0:N1} MB" -f ((Get-ChildItem stage\Sung -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Zip the package
+        run: Compress-Archive -Path stage\Sung -DestinationPath Sung-windows-x64.zip
+
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sung-windows-x64-${{ github.sha }}
+          path: Sung-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Sung-windows-x64.zip

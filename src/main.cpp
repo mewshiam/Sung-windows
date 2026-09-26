@@ -32,7 +32,9 @@
 #include <QStandardPaths>
 #include <QSvgRenderer>
 #include <QTimer>
+#ifdef Q_OS_UNIX
 #include <unistd.h>
+#endif
 #ifdef SUNG_DIAGNOSTICS
 #include "uitest.h"
 #include <QElapsedTimer>
@@ -42,6 +44,17 @@ void runBenchmark(Backend *, QQuickWindow *);
 #include <algorithm>
 #include <functional>
 #include <optional>
+
+// One instance per user. The socket (a named pipe on Windows) carries the uid
+// on Unix, where several accounts share the machine; Windows profiles are
+// isolated by path, so a stable hash of the profile path plays the same role.
+static QString singleInstanceName() {
+#ifdef Q_OS_UNIX
+  return "sung-" + QString::number(::getuid());
+#else
+  return "sung-" + QString::number(qHash(QDir::homePath()));
+#endif
+}
 
 class Symbols : public QQuickImageProvider {
 public:
@@ -120,6 +133,14 @@ int main(int argc, char **argv) {
   app.setOrganizationName("Sung");
   app.setApplicationVersion("0.12.0");
   app.setDesktopFileName("sung");
+#ifdef Q_OS_WIN
+  // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
+  // way. A portable install launched from Explorer carries no PATH entry for
+  // its own folder, so the application directory joins the front of the
+  // search path before any child can miss the bundled tools.
+  qputenv("PATH", (QCoreApplication::applicationDirPath().toUtf8() + ";"
+                   + qgetenv("PATH")));
+#endif
 #ifdef SUNG_DIAGNOSTICS
   if(app.arguments().contains("--immersive-polish-test"))app.setDesktopFileName("sung-immersive-test");
 #endif
@@ -129,7 +150,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   QLocalSocket peer;
-  peer.connectToServer("sung-" + QString::number(getuid()));
+  peer.connectToServer(singleInstanceName());
   if (!args.contains("--isolated") && peer.waitForConnected(120)) {
     peer.write(args.size() > 1 ? args.last().toUtf8() : QByteArray("raise"));
     peer.flush();
@@ -138,13 +159,17 @@ int main(int argc, char **argv) {
   }
   QLocalServer server;
   if (!args.contains("--isolated")) {
-    QLocalServer::removeServer("sung-" + QString::number(getuid()));
+    QLocalServer::removeServer(singleInstanceName());
     server.setSocketOptions(QLocalServer::UserAccessOption);
-    server.listen("sung-" + QString::number(getuid()));
+    server.listen(singleInstanceName());
   }
   QQuickStyle::setStyle("Basic");
   QFont font(QFontDatabase::families().contains("Google Sans Flex")
                  ? "Google Sans Flex"
+#ifdef Q_OS_WIN
+                 : QFontDatabase::families().contains("Segoe UI")
+                       ? "Segoe UI"
+#endif
                  : "Noto Sans");
   font.setPixelSize(14);
   app.setFont(font);

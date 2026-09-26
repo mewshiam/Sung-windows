@@ -1,4 +1,12 @@
 #pragma once
+#ifdef Q_OS_WIN
+// Windows has no D-Bus, so there is no MPRIS to speak on. Media keys and the
+// system media flyout are a Windows integration of their own, to be done
+// against WinRT's SystemMediaTransportControls; until then the control
+// surface stays the application's own.
+class Backend;
+inline void registerMpris(Backend *) {}
+#else
 #include "backend.h"
 #include <QDBusAbstractAdaptor>
 #include <QDBusObjectPath>
@@ -99,3 +107,4 @@ private:
   Backend *b;
 };
 void registerMpris(Backend *);
+#endif

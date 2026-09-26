@@ -28,9 +28,11 @@
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QUuid>
+#ifdef Q_OS_UNIX
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 static QString dataPath() {
   return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -234,8 +236,13 @@ void Backend::cancel(const QString &channel) {
   p->disconnect(this);
   for(auto timer:p->findChildren<QTimer*>()) timer->stop();
   connect(p,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),p,&QObject::deleteLater);
+  // The helper may leave children of its own, so the whole process group is
+  // torn down on Unix. Windows QProcess::kill() ends the tree's root, which
+  // is where the helper keeps its work.
+#ifdef Q_OS_UNIX
   if(p->processId()>0) ::kill(-p->processId(),SIGKILL);
   if(p->state()==QProcess::Starting) connect(p,&QProcess::started,p,[p]{if(p->processId()>0)::kill(-p->processId(),SIGKILL);p->kill();});
+#endif
   p->kill();
   if(p->state()==QProcess::NotRunning)p->deleteLater();
 }
@@ -246,7 +253,9 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
   // when cancel() disconnects the backend callback while killing its process group.
   if(lifetime) connect(p,&QObject::destroyed,[lifetime]{});
   m_processes.insert(channel, p);
+#ifdef Q_OS_UNIX
   p->setChildProcessModifier([] { ::setsid(); });
+#endif
   QString helper = qEnvironmentVariable("SUNG_HELPER");
   if (helper.isEmpty())
     helper = QCoreApplication::applicationDirPath() + "/../helper/catalog.py";
@@ -256,10 +265,24 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
   if (python.isEmpty()) {
     auto bundled =
         QCoreApplication::applicationDirPath() + "/../runtime/bin/python";
+#ifdef Q_OS_WIN
+    if (!QFile::exists(bundled))
+      bundled = QCoreApplication::applicationDirPath() +
+                "/../runtime/bin/python.exe";
+    // The Windows package keeps the embeddable interpreter at runtime/
+    // directly, with no bin directory for a launcher to sit in.
+    if (!QFile::exists(bundled))
+      bundled = QCoreApplication::applicationDirPath() +
+                "/../runtime/python.exe";
+#endif
     if (!QFile::exists(bundled))
       bundled = QCoreApplication::applicationDirPath() +
                 "/../lib/sung/runtime/bin/python";
+#ifdef Q_OS_WIN
+    python = QFile::exists(bundled) ? bundled : QStringLiteral("python");
+#else
     python = QFile::exists(bundled) ? bundled : QStringLiteral("python3");
+#endif
   }
   auto timer = new QTimer(p);
   timer->setSingleShot(true);
@@ -275,7 +298,8 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
             m_processes.remove(channel);
             done({{"ok", false},
                   {"error",
-                   "YouTube helper could not start. Run scripts/setup.sh."}});
+                   "YouTube helper could not start. Check that Python and "
+                   "the helper are installed."}});
             p->deleteLater();
           });
   connect(p, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,

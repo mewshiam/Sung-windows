@@ -1,4 +1,45 @@
 #include "playbacknotifier.h"
+#ifdef Q_OS_WIN
+#include <QIcon>
+#include <QSystemTrayIcon>
+
+// The freedesktop notification bus does not exist on Windows, so the same
+// transient now-playing hint goes through the tray's balloon message, which
+// Windows 10 and 11 render as a regular toast. Windows drops balloons while
+// the tray icon is hidden, and showing and hiding the host around each one
+// races its own visibility, so the icon stays alive for the notifier's
+// lifetime. The toasts still dismiss themselves after the timeout.
+PlaybackNotifier::PlaybackNotifier(QObject *parent) : QObject(parent) {}
+void PlaybackNotifier::show(const QString &title, const QString &artist) {
+  if (title.isEmpty())
+    return;
+  m_queued = {{"title", title.left(200)}, {"artist", artist.left(200)}};
+  flush();
+}
+void PlaybackNotifier::clear() {
+  m_queued.clear();
+  // Windows removes a balloon when its tray icon goes away, which is the
+  // dismissal the Unix bus gets from CloseNotification.
+  if (m_tray)
+    m_tray->hide();
+}
+void PlaybackNotifier::flush() {
+  if (m_queued.isEmpty())
+    return;
+  if (!m_tray)
+    m_tray = new QSystemTrayIcon(QIcon(":/sung.png"), this);
+  m_tray->show();
+  const auto track = m_queued;
+  m_queued.clear();
+  const auto artist = track.value("artist").toString();
+  const auto text =
+      artist.isEmpty() ? track.value("title").toString()
+                       : artist + " — " + track.value("title").toString();
+  m_tray->showMessage("Sung", text, QSystemTrayIcon::NoIcon, 5000);
+}
+void PlaybackNotifier::close(uint) {}
+void PlaybackNotifier::notificationClosed(uint, uint) {}
+#else
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
@@ -42,3 +83,4 @@ void PlaybackNotifier::flush() {
     m_pending=false;call->deleteLater();flush();
   });
 }
+#endif

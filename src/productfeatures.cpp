@@ -11,6 +11,15 @@
 #include <functional>
 #include <limits>
 
+// The pause-on-disconnect refinement watches PulseAudio's sinks through the
+// pactl CLI, which exists on Unix only. QMediaDevices in outputsChanged()
+// still pauses for a vanished device everywhere.
+#ifdef Q_OS_UNIX
+#define SUNG_PACTL_MONITOR 1
+#else
+#define SUNG_PACTL_MONITOR 0
+#endif
+
 QVariantMap Backend::albumInfo() const {
   if(m_page!="album" && m_page!="local-album" && !(m_page=="server" && m_request.value("mode")=="album"))return {};
   QString artist=m_request.value("artist").toString();
@@ -328,7 +337,12 @@ void Backend::outputsChanged(){
 void Backend::setPauseOnDisconnect(bool enabled){
   if(enabled==pauseOnDisconnect())return;
   m_settings.setValue("pauseOnDisconnect",enabled);emit settingsChanged();m_outputPort.clear();
-  if(enabled){if(m_portMonitor.state()==QProcess::NotRunning)m_portMonitor.start("pactl",{"subscribe"});m_portDebounce.start();}
+  if(enabled){
+#if SUNG_PACTL_MONITOR
+    if(m_portMonitor.state()==QProcess::NotRunning)m_portMonitor.start("pactl",{"subscribe"});
+#endif
+    m_portDebounce.start();
+  }
   else {m_portDebounce.stop();m_portTimeout.stop();m_portMonitor.kill();m_portProbe.kill();}
 }
 void Backend::setupDisconnectMonitor(){
@@ -337,7 +351,11 @@ void Backend::setupDisconnectMonitor(){
   connect(&m_portDebounce,&QTimer::timeout,this,&Backend::refreshOutputPort);
   connect(&m_portMonitor,&QProcess::readyReadStandardOutput,this,[this]{const auto events=m_portMonitor.readAllStandardOutput();if(pauseOnDisconnect()&&(events.contains("sink")||events.contains("card")))m_portDebounce.start();});
   connect(&m_portMonitor,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,[this]{
-    if(pauseOnDisconnect())QTimer::singleShot(1000,this,[this]{if(pauseOnDisconnect()&&m_portMonitor.state()==QProcess::NotRunning){m_portMonitor.start("pactl",{"subscribe"});m_portDebounce.start();}});
+    if(pauseOnDisconnect())QTimer::singleShot(1000,this,[this]{if(pauseOnDisconnect()&&m_portMonitor.state()==QProcess::NotRunning){
+#if SUNG_PACTL_MONITOR
+      m_portMonitor.start("pactl",{"subscribe"});
+#endif
+      m_portDebounce.start();}});
   });
   connect(&m_portMonitor,&QProcess::readyReadStandardError,this,[this]{m_portMonitor.readAllStandardError();});
   connect(&m_portProbe,&QProcess::readyReadStandardOutput,this,[this]{if(m_portProbe.bytesAvailable()>1024*1024)m_portProbe.kill();});
@@ -346,9 +364,18 @@ void Backend::setupDisconnectMonitor(){
     if(pauseOnDisconnect()&&code==0&&status==QProcess::NormalExit)inspectOutputPorts(QJsonDocument::fromJson(data).toVariant().toList());
     if(m_portDirty){m_portDirty=false;m_portDebounce.start();}
   });
-  if(pauseOnDisconnect()){m_portMonitor.start("pactl",{"subscribe"});m_portDebounce.start();}
+  if(pauseOnDisconnect()){
+#if SUNG_PACTL_MONITOR
+    m_portMonitor.start("pactl",{"subscribe"});
+#endif
+    m_portDebounce.start();
+  }
 }
-void Backend::refreshOutputPort(){if(!pauseOnDisconnect())return;if(m_portProbe.state()!=QProcess::NotRunning){m_portDirty=true;return;}m_portProbe.start("pactl",{"-f","json","list","sinks"});m_portTimeout.start();}
+void Backend::refreshOutputPort(){if(!pauseOnDisconnect())return;if(m_portProbe.state()!=QProcess::NotRunning){m_portDirty=true;return;}
+#if SUNG_PACTL_MONITOR
+  m_portProbe.start("pactl",{"-f","json","list","sinks"});
+#endif
+  m_portTimeout.start();}
 void Backend::inspectOutputPorts(const QVariantList &sinks){
   for(const auto &v:sinks){const auto s=v.toMap();if(s.value("description").toString()!=m_outputDescription && s.value("name").toString()!=QString::fromUtf8(m_outputId))continue;
     const auto port=s.value("active_port").toString();

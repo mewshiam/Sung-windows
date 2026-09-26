@@ -1,8 +1,12 @@
 # Public source allowlist. Review new top-level paths and assets before adding them.
 /*
 !/.gitignore
+!/.github/
+!/.github/workflows/
+!/.github/workflows/windows.yml
 !/README.md
 !/CLAUDE.md
+!/WINDOWS_BUILD.md
 !/LICENSE
 !/NOTICE
 !/CMakeLists.txt
@@ -17,6 +21,7 @@
 /src/*
 !/src/*.cpp
 !/src/*.h
+!/src/app.rc
 /qml/*
 !/qml/*.qml
 /helper/*
@@ -32,6 +37,7 @@
 /assets/*
 !/assets/readme-now-playing.png
 !/assets/sung.png
+!/assets/sung.ico
 !/assets/sung.desktop
 !/assets/icons/
 /assets/icons/*
@@ -64,8 +70,9 @@ settings.json
 .idea/
 .vscode/
 
-# README and CLAUDE.md are the only Markdown files in the public repository.
+# README, CLAUDE.md and WINDOWS_BUILD.md are the Markdown files in the public repository.
 *.[mM][dD]
 *.[mM][aA][rR][kK][dD][oO][wW][nN]
 !/README.md
 !/CLAUDE.md
+!/WINDOWS_BUILD.md
