@@ -1,14 +1,82 @@
 #include "playbacknotifier.h"
 #ifdef Q_OS_WIN
-#include <QIcon>
-#include <QSystemTrayIcon>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <shellapi.h>
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "shell32.lib")
 
 // The freedesktop notification bus does not exist on Windows, so the same
-// transient now-playing hint goes through the tray's balloon message, which
-// Windows 10 and 11 render as a regular toast. Windows drops balloons while
-// the tray icon is hidden, and showing and hiding the host around each one
-// races its own visibility, so the icon stays alive for the notifier's
-// lifetime. The toasts still dismiss themselves after the timeout.
+// transient now-playing hint goes through a tray icon's balloon message,
+// which Windows 10 and 11 render as a regular toast. The tray icon comes
+// from Shell_NotifyIcon directly: Qt's own wrapper lives in Qt Widgets,
+// and this Qt Quick application does not carry them. The icon uses the
+// executable's own, and stays alive for the notifier's lifetime because
+// Windows drops balloons from icons that vanish.
+struct PlaybackNotifier::TrayBalloon {
+  HWND window = nullptr;
+  bool added = false;
+  ~TrayBalloon() { remove(); if (window) DestroyWindow(window); }
+  bool ready() {
+    if (window) return true;
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"SungNotificationHost";
+    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+      return false;
+    // A message-only window: the tray needs a handle for its callbacks,
+    // not a visible surface.
+    window = CreateWindowW(wc.lpszClassName, L"Sung", 0, 0, 0, 0, 0,
+                           HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+    return window != nullptr;
+  }
+  bool present() {
+    if (!ready()) return false;
+    if (added) return true;
+    NOTIFYICONDATAW data = {};
+    data.cbSize = sizeof(data);
+    data.hWnd = window;
+    data.uID = 1;
+    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    data.uCallbackMessage = WM_APP + 1;
+    // The executable's own icon sits at resource 1; the generic application
+    // icon is the fallback if it ever fails to load.
+    data.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
+    if (!data.hIcon) data.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    lstrcpyW(data.szTip, L"Sung");
+    added = Shell_NotifyIconW(NIM_ADD, &data) != FALSE;
+    return added;
+  }
+  void show(const QString &title, const QString &text) {
+    if (!present()) return;
+    NOTIFYICONDATAW data = {};
+    data.cbSize = sizeof(data);
+    data.hWnd = window;
+    data.uID = 1;
+    data.uFlags = NIF_INFO;
+    // A quiet-time-respecting, icon-less toast: the text is the message.
+    data.dwInfoFlags = NIIF_NONE | NIIF_RESPECT_QUIET_TIME;
+    // Both balloon texts are fixed-size buffers; copy inside their bounds
+    // and terminate them by hand.
+    title.left(63).toWCharArray(data.szInfoTitle);
+    text.left(255).toWCharArray(data.szInfo);
+    data.szInfoTitle[qMin(63, title.length())] = L'\0';
+    data.szInfo[qMin(255, text.length())] = L'\0';
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+  }
+  void remove() {
+    if (!added) return;
+    NOTIFYICONDATAW data = {};
+    data.cbSize = sizeof(data);
+    data.hWnd = window;
+    data.uID = 1;
+    Shell_NotifyIconW(NIM_DELETE, &data);
+    added = false;
+  }
+};
+
 PlaybackNotifier::PlaybackNotifier(QObject *parent) : QObject(parent) {}
 void PlaybackNotifier::show(const QString &title, const QString &artist) {
   if (title.isEmpty())
@@ -21,21 +89,20 @@ void PlaybackNotifier::clear() {
   // Windows removes a balloon when its tray icon goes away, which is the
   // dismissal the Unix bus gets from CloseNotification.
   if (m_tray)
-    m_tray->hide();
+    m_tray->remove();
 }
 void PlaybackNotifier::flush() {
   if (m_queued.isEmpty())
     return;
   if (!m_tray)
-    m_tray = new QSystemTrayIcon(QIcon(":/sung.png"), this);
-  m_tray->show();
+    m_tray = new TrayBalloon();
   const auto track = m_queued;
   m_queued.clear();
   const auto artist = track.value("artist").toString();
   const auto text =
       artist.isEmpty() ? track.value("title").toString()
                        : artist + " — " + track.value("title").toString();
-  m_tray->showMessage("Sung", text, QSystemTrayIcon::NoIcon, 5000);
+  m_tray->show("Sung", text);
 }
 void PlaybackNotifier::close(uint) {}
 void PlaybackNotifier::notificationClosed(uint, uint) {}

@@ -1,9 +1,6 @@
 #pragma once
 #include <QObject>
 #include <QVariantMap>
-#ifdef Q_OS_WIN
-class QSystemTrayIcon;
-#endif
 
 class PlaybackNotifier : public QObject {
   Q_OBJECT
@@ -21,7 +18,9 @@ private:
   quint64 m_generation = 0;
   bool m_pending = false;
 #ifdef Q_OS_WIN
-  // The toast host on Windows; the Unix side speaks D-Bus instead.
-  QSystemTrayIcon *m_tray = nullptr;
+  // The Windows toast host: a tray icon carrying balloon messages, defined
+  // in playbacknotifier.cpp. It keeps Qt Widgets out of a Qt Quick app.
+  struct TrayBalloon;
+  TrayBalloon *m_tray = nullptr;
 #endif
 };
