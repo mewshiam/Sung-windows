@@ -4,14 +4,27 @@
 // (MinGW) alike, and both resolve paths relative to this file. winres.h
 // carries the VOS_ and VFT_ constants the version block below uses.
 #include <winres.h>
-#define IDI_ICON1 1
 
+// Explorer, Task Manager and the tray balloon (MAKEINTRESOURCEW(1)) read the
+// first group icon; it keeps the numeric id 1.
+1 ICON "../assets/sung.ico"
+
+// Qt registers every window class with the icon it finds in the exe under
+// the STRING name "IDI_ICON1" - an identifier the script leaves undefined,
+// which is how Qt's own qtmain.rc declares it. Any window without an icon of
+// its own (the mini player, message boxes) falls back to that class icon in
+// the taskbar, so the resource must exist under exactly that name. The
+// define this file used to carry turned the name into numeric id 1, the
+// lookup missed, and the taskbar showed the generic application icon instead.
+#ifdef IDI_ICON1
+#undef IDI_ICON1
+#endif
 IDI_ICON1 ICON "../assets/sung.ico"
 
-#define VER_FILEVERSION             0,12,3,0
-#define VER_FILEVERSION_STR         "0.12.3\0"
-#define VER_PRODUCTVERSION          0,12,3,0
-#define VER_PRODUCTVERSION_STR      "0.12.3\0"
+#define VER_FILEVERSION             0,12,4,0
+#define VER_FILEVERSION_STR         "0.12.4\0"
+#define VER_PRODUCTVERSION          0,12,4,0
+#define VER_PRODUCTVERSION_STR      "0.12.4\0"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION    VER_FILEVERSION

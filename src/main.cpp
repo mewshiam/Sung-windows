@@ -132,15 +132,8 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.12.3");
+  app.setApplicationVersion("0.12.4");
   app.setDesktopFileName("sung");
-#ifdef Q_OS_WIN
-  // The exe carries the icon in its resource script, but a running QML
-  // window takes its icon from the application, not the file, and would
-  // otherwise show a blank sheet in the taskbar. The artwork is embedded
-  // as a resource on Windows, so point the window icon at it directly.
-  app.setWindowIcon(QIcon(QStringLiteral(":/sung.png")));
-#endif
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
   // way. A portable install launched from Explorer carries no PATH entry for
@@ -236,6 +229,17 @@ int main(int argc, char **argv) {
   if (engine.rootObjects().isEmpty())
     return 1;
   auto window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+  // The taskbar button shows the window's own icon, and a QML window never
+  // takes one from QGuiApplication::setWindowIcon - on Windows the platform
+  // integration drops that call outright, which is why the running window
+  // went bare while the file itself carried the artwork. Give the window the
+  // icon itself, as soon as it exists. Windows also registers its window
+  // class with the icon stored in the exe under the string name
+  // "IDI_ICON1" (see app.rc), which carries every window Sung opens later,
+  // such as the mini player. The png is embedded in the resources on Windows
+  // only; elsewhere the icon stays empty and the desktop file keeps answering
+  // for the application.
+  window->setIcon(QIcon(QStringLiteral(":/sung.png")));
   // Reading the library and building the interface free a good deal of what
   // they allocate on the way; with 10,000 songs, 16 MiB on the desktop and 24
   // offscreen were still held for nothing once the window was up. The first
