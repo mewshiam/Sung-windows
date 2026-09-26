@@ -1,7 +1,9 @@
 // Windows resource script for Sung. The icon is what Explorer, the taskbar
 // and the Start menu show; the version block is what the Properties dialog
 // and installers read. RC files are compiled by rc.exe (MSVC) and windres
-// (MinGW) alike, and both resolve paths relative to this file.
+// (MinGW) alike, and both resolve paths relative to this file. winres.h
+// carries the VOS_ and VFT_ constants the version block below uses.
+#include <winres.h>
 #define IDI_ICON1 1
 
 IDI_ICON1 ICON "../assets/sung.ico"
