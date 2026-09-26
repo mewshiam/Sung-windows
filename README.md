@@ -152,6 +152,7 @@ For development on either platform: `./scripts/setup.sh`, `./scripts/build.sh`, 
 
   …or simply grab the newest release, which ships current versions.
 - **SmartScreen warning** — the portable exe is unsigned; *More info → Run anyway* is expected until a signing certificate is set up.
+- **Blank or generic file icon** — Windows caches file icons per path. After replacing the exe, run `ie4uinit.exe -show` from the Run dialog (Win+R), or simply move or rename the `Sung` folder; the icon then appears. The icon is embedded in the exe in the classic multi-size bitmap format, so no special viewer is needed.
 - **No sound / codec issues** — Qt Multimedia uses Windows Media Foundation with its own ffmpeg runtime; copying the package folder wholesale avoids missing-DLL problems.
 
 ## Credits and license

@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QFontDatabase>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QNetworkAccessManager>
@@ -131,8 +132,15 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.12.0");
+  app.setApplicationVersion("0.12.2");
   app.setDesktopFileName("sung");
+#ifdef Q_OS_WIN
+  // The exe carries the icon in its resource script, but a running QML
+  // window takes its icon from the application, not the file, and would
+  // otherwise show a blank sheet in the taskbar. The artwork is embedded
+  // as a resource on Windows, so point the window icon at it directly.
+  app.setWindowIcon(QIcon(QStringLiteral(":/sung.png")));
+#endif
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
   // way. A portable install launched from Explorer carries no PATH entry for
