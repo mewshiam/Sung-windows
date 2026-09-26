@@ -29,6 +29,12 @@ qt_add_executable(sung src/windowresources.h src/artworkurl.h src/discord.h src/
 if(SUNG_DBUS)
   target_sources(sung PRIVATE src/mpris.cpp)
 endif()
+if(NOT SUNG_DBUS)
+  # mpris.h's non-DBus branch carries no Q_OBJECT classes, but moc cannot
+  # evaluate Q_OS_UNIX and still emits the Unix adaptors' metaobjects, which
+  # reference a header the Windows build never includes. Keep moc out.
+  set_source_files_properties(src/mpris.h PROPERTIES SKIP_AUTOMOC ON)
+endif()
 target_link_libraries(sung PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::Multimedia Qt6::Network Qt6::Svg Qt6::Concurrent)
 if(SUNG_DBUS)
   target_link_libraries(sung PRIVATE Qt6::DBus)
