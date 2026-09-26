@@ -102,7 +102,9 @@ jobs:
                     stage\Sung\bin\
 
       - name: Bundle ffmpeg and ffprobe
-        if: ${{ inputs.include_ffmpeg != false }}
+        # On pushes and tags the input context is empty; only a manual
+        # dispatch can turn the bundling off.
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.include_ffmpeg }}
         run: |
           Invoke-WebRequest `
             "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip" `
@@ -139,7 +141,7 @@ jobs:
             "stage\Sung\bin\sung.exe",
             "stage\Sung\bin\qt.conf",
             "stage\Sung\bin\Qt6Core.dll",
-            "stage\Sung\bin\platforms\qwindows.dll",
+            "stage\Sung\bin\plugins\platforms\qwindows.dll",
             "stage\Sung\bin\qml\QtQuick",
             "stage\Sung\bin\msvcp140.dll",
             "stage\Sung\helper\catalog.py",
