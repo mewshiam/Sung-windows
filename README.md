@@ -8,10 +8,13 @@
 
 # Sung
 
-**YouTube Music, your music files, and your music server. Native on Linux.**
+**YouTube Music, your music files, and your music server. Native on Linux and Windows.**
+
+> This repository is a Windows-focused build of [**Sung**](https://github.com/yappologistic/Sung), the player written by [**@yappologistic**](https://github.com/yappologistic). All credit for the player itself belongs to the original author — go there for the Linux project, and consider [supporting them](https://buymeacoffee.com/e_gurl). This fork adds Windows packaging plus a few small features on top, listed below.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Linux](https://img.shields.io/badge/platform-Linux-blue.svg)
+![Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)
 ![Qt 6](https://img.shields.io/badge/built_with-Qt_6-41CD52.svg)
 
 A minimal Material 3 player built with C++ and Qt Quick, designed for CachyOS and Wayland.
@@ -34,6 +37,9 @@ A minimal Material 3 player built with C++ and Qt Quick, designed for CachyOS an
 - **Playback controls**: mini player, queue editing with source headings, an immersive up-next carousel, volume normalization, shuffle, repeat, sleep timer, playback speed and audio-device selection.
 - **Keyboard and assistive use**: every control takes focus and shows it, sections are marked as headings, and colors are solved to keep 4.5:1 contrast in both themes and at either contrast setting.
 - **Desktop integration**: media keys through MPRIS, optional notifications, light/dark themes and Noctalia palette support.
+- **SponsorBlock**: sponsor reads, self-promotion, long intros and other non-music segments are skipped automatically using community timings from [SponsorBlock](https://sponsor.ajay.app) (off by default, under Settings → Playback).
+- **Discord Rich Presence**: what is playing shows on your Discord profile through Discord's own local connection, with a button back to the track (off by default, under Settings → Connections).
+- **Proxy**: every outbound request — YouTube, yt-dlp, lyrics, artwork and SponsorBlock — can go through an HTTP or SOCKS5 proxy (Settings → Connections → Network).
 
 Native rendering and bounded artwork caches keep Sung lightweight. Animated covers share one additional decoder, released when the player is hidden. Animations can be disabled in Settings.
 
@@ -71,7 +77,9 @@ Sung uses Google Sans Flex when installed and otherwise falls back to a system f
 
 ### Windows
 
-Sung builds on Windows as a portable, self-contained zip (Qt, an embedded Python runtime for the YouTube helper and ffmpeg all ship inside it). The build runs on GitHub Actions and produces a downloadable `Sung-windows-x64` artifact on every push — see [WINDOWS_BUILD.md](WINDOWS_BUILD.md) for the artifact, the local build recipe, and the current feature notes on Windows (media-key integration is pending; everything else works, no installer needed).
+Sung builds on Windows as a portable, self-contained zip (Qt, an embedded Python runtime for the YouTube helper and ffmpeg all ship inside it) — no installer needed. Grab it from the [Releases page](https://github.com/mewshiam/Sung-windows/releases), unzip it anywhere, and run `Sung\bin\sung.exe`. Every push also produces a downloadable `Sung-windows-x64` artifact under [Actions](https://github.com/mewshiam/Sung-windows/actions) — see [WINDOWS_BUILD.md](WINDOWS_BUILD.md) for the package layout, the local build recipe, and the current feature notes on Windows (media-key integration is pending; everything else works).
+
+SponsorBlock, Discord Rich Presence and the proxy setting are part of this build; each one is switched off until you turn it on in Settings.
 
 ## Getting started
 
