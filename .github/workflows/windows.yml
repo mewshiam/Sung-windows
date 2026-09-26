@@ -69,7 +69,7 @@ jobs:
           Copy-Item helper\catalog.py, helper\online_artwork.py, helper\requirements.txt stage\Sung\helper\
           Copy-Item LICENSE, NOTICE stage\Sung\
           Copy-Item licenses stage\Sung\licenses -Recurse
-          Copy-Item WINDOWS_BUILD.md stage\Sung\README-WINDOWS.md
+          Copy-Item README.md stage\Sung\README.md
 
       - name: Deploy Qt next to the executable
         run: |

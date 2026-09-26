@@ -6,7 +6,7 @@
 !/.github/workflows/windows.yml
 !/README.md
 !/CLAUDE.md
-!/WINDOWS_BUILD.md
+
 !/LICENSE
 !/NOTICE
 !/CMakeLists.txt
@@ -70,9 +70,9 @@ settings.json
 .idea/
 .vscode/
 
-# README, CLAUDE.md and WINDOWS_BUILD.md are the Markdown files in the public repository.
+# README and CLAUDE.md are the Markdown files in the public repository.
 *.[mM][dD]
 *.[mM][aA][rR][kK][dD][oO][wW][nN]
 !/README.md
 !/CLAUDE.md
-!/WINDOWS_BUILD.md
+
