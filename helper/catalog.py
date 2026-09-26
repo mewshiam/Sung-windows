@@ -1,9 +1,30 @@
 #!/usr/bin/env python3
 """One request per process. No server, browser, telemetry, or idle worker."""
+import io
 import json
 import re
 import sys
 from urllib.parse import urlparse, parse_qs
+
+# Windows hands a Python talking through pipes the ANSI code page (cp1252),
+# which cannot carry the Unicode inside song titles: the request's own query
+# arrived mojibaked and printing a result raised UnicodeEncodeError, so the
+# request reported that error instead of its data. Every channel speaks
+# UTF-8, and text that still cannot be encoded is replaced rather than
+# allowed to fail the request.
+for _name in ('stdin', 'stdout', 'stderr'):
+    _stream = getattr(sys, _name)
+    _errors = 'strict' if _name == 'stdin' else 'replace'
+    try:
+        _stream.reconfigure(encoding='utf-8', errors=_errors)
+    except (AttributeError, ValueError):
+        if hasattr(_stream, 'buffer'):
+            _wrapped = io.TextIOWrapper(_stream.buffer, encoding='utf-8',
+                                        errors=_errors)
+            if _name != 'stdin':
+                _wrapped.line_buffering = True
+            setattr(sys, _name, _wrapped)
+del _name, _stream, _errors
 
 
 def artwork(item):
@@ -490,7 +511,9 @@ if __name__ == '__main__':
         payload = sys.stdin.read(16*1024*1024+1)
         if len(payload)>16*1024*1024: raise ValueError('Request is too large')
         data = run(json.loads(payload))
-        print(json.dumps({'ok': True, **data}, ensure_ascii=False))
+        # ensure_ascii keeps the payload pure ASCII even if both stream fixes
+        # above were bypassed; Qt's JSON parser reads the \uXXXX escapes.
+        print(json.dumps({'ok': True, **data}))
     except Exception as exc:
         print(json.dumps({'ok': False, 'error': str(exc)[-1800:]}))
         sys.exit(1)

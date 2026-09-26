@@ -329,6 +329,13 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
             p->deleteLater();
             done(result);
           });
+  // A piped Python on Windows gets the ANSI code page for stdio, which
+  // cannot carry the Unicode inside song titles. Force UTF-8 stdio and
+  // UTF-8 mode on the child so answers survive the round trip.
+  auto childEnv = QProcessEnvironment::systemEnvironment();
+  childEnv.insert("PYTHONIOENCODING", "utf-8");
+  childEnv.insert("PYTHONUTF8", "1");
+  p->setProcessEnvironment(childEnv);
   p->start(python, {helper});
   p->write(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact));
   p->closeWriteChannel();
