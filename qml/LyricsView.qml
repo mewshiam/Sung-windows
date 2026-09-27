@@ -15,7 +15,19 @@ Item {
         if(index<0 || index>=matches.length || matches[index].start<0)return;
         app.seekLyric(matches[index].start);closeSearch();
     }
-    Connections { target: app; function onLyricsChanged(){if(lyricPane.searchOpen)lyricPane.refreshSearch();} }
+    Connections {
+        target: app
+        function onLyricsChanged(){if(lyricPane.searchOpen)lyricPane.refreshSearch();liveLyrics.heldLineIndex=-1;}
+        // Timed lyrics carry real end times, and a stretch between two lines
+        // reports no live line (lyricIndex -1). Remember the last line sung so
+        // the reading view can hold it until the next one begins.
+        function onLyricIndexChanged(){
+            if(app.lyricIndex>=0)liveLyrics.heldLineIndex=app.lyricIndex;
+            // A seek back into the intro, before any line has begun, holds
+            // nothing; the view simply waits for the first line.
+            else if(app.lyricLines.length && app.position+app.lyricOffset<app.lyricLines[0].start)liveLyrics.heldLineIndex=-1;
+        }
+    }
     RowLayout {
         id: searchControls; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         height: visible?48:0; visible: lyricPane.searchOpen; spacing: 6
@@ -120,7 +132,15 @@ Item {
         onCountChanged: centerCurrent()
         onVisibleChanged: {if(visible)centerCurrent();}
         onHeightChanged: centerCurrent()
-        currentIndex: app.lyricIndex
+        // Between two sung lines the view keeps the last one current. Ending
+        // the current line at its end would send the invisible highlight (the
+        // y the reading range enforces) falling to the top of the content and
+        // drag the whole list with it, and no line would carry the emphasis
+        // in the gap. Holding the line keeps the page still until the next
+        // one starts; the gap cue below counts long stretches down.
+        property int heldLineIndex: -1
+        readonly property int shownLineIndex: app.lyricIndex>=0 ? app.lyricIndex : heldLineIndex
+        currentIndex: shownLineIndex
         property int keyboardIndex: -1
         // One tooltip serves every line: it follows whichever line is hovered
         // or chosen from the keyboard, instead of each pooled line keeping a
@@ -195,7 +215,7 @@ Item {
             // A poster row set larger than the plain line needs the room.
             implicitHeight: (posterLoader.item ? posterLoader.item.implicitHeight+lyricLabel.topPadding+lyricLabel.bottomPadding
                                                : lyricLabel.implicitHeight)+20
-            property bool current: index===app.lyricIndex
+            property bool current: index===liveLyrics.shownLineIndex
             property bool completedHidden: !app.keepCompletedLyrics && (modelData.end>0 ? app.position+app.lyricOffset>=modelData.end : app.lyricIndex>index)
             readonly property bool hovered: lineHover.hovered
             // A line crossing the clipped viewport should vanish before a

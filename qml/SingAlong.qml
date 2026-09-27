@@ -87,8 +87,15 @@ Item {
         // Qt ListView's custom-highlight path allows DefaultSpatial to move
         // the reading position with its published duration and curve.
         highlightFollowsCurrentItem: false
+        // Through an instrumental stretch no line is current (the cue below
+        // counts it down), but the highlight - the y the reading range
+        // enforces - must not fall back to the top of the content: it holds
+        // where the last line sat, so the words stay on screen through the
+        // gap instead of the view dragging them away and back.
+        property real heldHighlightY: 0
+        onCurrentItemChanged: if(currentItem)heldHighlightY=currentItem.y
         highlight: Item {
-            y: lines.currentItem ? lines.currentItem.y : 0
+            y: lines.currentItem ? lines.currentItem.y : lines.heldHighlightY
             Behavior on y { enabled: app.motion; NumberAnimation { objectName: "singAlongHighlightMotion"; duration: Theme.springSpatialMs; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } }
         }
 
