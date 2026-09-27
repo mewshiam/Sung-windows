@@ -18,11 +18,15 @@
 
 ## What this build adds
 
+- **Downloads** — YouTube songs can be saved as real audio files. Choose a folder under **Settings → Library → Downloads** (a Sung folder inside your Music by default), then **Download** any song from its menu — the track menu, the bulk selection menu or the track-details dialog. Each song lands as an `.m4a` with its own tags and cover stamped on, fetched by the same helper that streams and finished with the bundled ffmpeg. One download runs at a time; a pill above the playback bar shows progress and cancels, and a tray balloon carries the news while the window is hidden.
+- **Save songs you play** — with the switch under **Settings → Library**, any song heard long enough to count as listened — the same point it enters your history — queues for the downloads folder on its own, bringing the same files, tags and covers the Download action brings. A ledger keeps every heard song to one fetch; one that failed is not in it, so the next hearing asks again. Skipped songs are not saved, and a paused listening history (private sessions) pauses auto-saving with it.
+- **Performance mode** — one switch under **Settings → Appearance** for integrated GPUs and low-end machines: flat surfaces, no washes in the panes, no Motion layout, no visualizer and no animated covers, while playback, lyrics and browsing are unchanged. Frame pacing, worker-thread decodes and a periodic working-set trim sit underneath either way, so the interface stays smooth.
 - **System tray** — optionally keep Sung in the notification area: **minimize to tray** tucks the window away while the music plays, and **close to tray** leaves it running when the window is closed, so quitting is a choice made from the tray icon's menu (Open, Play/Pause, Previous, Next, Quit). Both live under **Settings → Connections → System tray**.
 - **Window memory** — the window comes back the size, position and maximized state it was left in; a first run opens centred on the screen.
 - **SponsorBlock** — sponsor reads, self-promotion, long intros and other non-music segments are skipped automatically, using community timings from [sponsor.ajay.app](https://sponsor.ajay.app). Off by default; turn it on under **Settings → Playback → Skip non-music segments**. While the switch is off, nothing is sent anywhere.
 - **Discord Rich Presence** — the playing track appears on your Discord profile with its cover, elapsed time and a button back to the song, through Discord's own local pipe connection. No token, no extra account, no third-party service. Off by default; enable under **Settings → Connections → Discord**.
 - **Proxy support** — every outbound request (YouTube Music, yt-dlp, lyrics, artwork, SponsorBlock) can go through an HTTP or SOCKS5 proxy under **Settings → Connections → Network**, for example `http://127.0.0.1:8080` or `socks5://host:1080`.
+- **Interface refinements** — the mini player reads as one rounded card with no square slab behind it; the fullscreen lyrics column can sit left, centre or right (the immersive layout menu, or **Position in full screen** in the Lyrics dialog); and the visualizer can carry a small lyrics line under the ring (**Lyrics in visualizer** in the same menu).
 
 ## Install on Windows
 
@@ -63,11 +67,11 @@ Sung\
 - **Animated artwork**: local animated covers and automatic online covers for matching YouTube songs, shared across the player, immersive view and mini player; lists use still covers.
 - **Appearance**: light and dark themes, a pickable Material accent color, artwork-derived color, an ambient cover backdrop, density and per-view layouts.
 - **Lyrics**: synchronized lyrics, an immersive view, optional poster-style lines, timing adjustments, LRC import, seek previews and search with jump-to-line playback.
-- **Offline**: songs you have played are kept on disk under a limit you set, so a replay starts at once and needs no network.
+- **Offline**: songs you have played are kept on disk under a limit you set, so a replay starts at once and needs no network; any song can also be saved for real to your downloads folder, by hand or automatically as you listen.
 - **Library tools**: likes, listening history, smart mixes, custom smart playlists, M3U playlist import and export, custom playlist covers, playlist cleanup, multi-selection, drag reordering and Undo.
 - **Playback controls**: mini player, queue editing with source headings, an immersive up-next carousel, volume normalization, shuffle, repeat, sleep timer, playback speed and audio-device selection.
 - **Keyboard and assistive use**: every control takes focus and shows it, sections are marked as headings, and colors are solved to keep 4.5:1 contrast in both themes and at either contrast setting.
-- **System tray**, **SponsorBlock**, **Discord Rich Presence** and **Proxy** as described above — each one switched off until you turn it on in Settings.
+- **System tray**, **Downloads**, **SponsorBlock**, **Discord Rich Presence**, **Performance mode** and **Proxy** as described above — the optional ones switched off until you turn them on in Settings.
 
 Native rendering and bounded artwork caches keep Sung lightweight. Animations can be disabled in Settings.
 
@@ -78,6 +82,8 @@ On first run Sung offers a three-step setup: theme and accent color, a music fol
 **YouTube.** Search from the capsule at the top of the window, or paste a song, album or playlist link. Playback controls, the queue (**Ctrl+L**) and the immersive player (**F11**) are one click away. Streaming quality and offline keeping are under **Settings → Privacy & data**. The next queued song is prepared while the current one plays — starting the moment the song begins rather than in its final minute, and under shuffle too, where the next song is drawn in advance — so skipping and song changes start at once.
 
 **Local files.** Use **Library → Local files → +** to import files, or **Folders → Add folder…** for a whole music folder (subfolders are scanned recursively and updates are watched while Sung runs). Local and YouTube songs mix freely in the same playlists.
+
+**Downloads.** Saved songs go to the folder chosen under **Settings → Library → Downloads** — a Sung folder inside your Music until you pick another, and **Open downloads folder** jumps straight to it. **Download** sits on every YouTube song's menu: single songs, the bulk selection and the track-details dialog; local and server songs are already files you hold, so only YouTube rows offer it. A pill above the playback bar carries progress and a cancel button, and each finished song announces itself — a toast in the window, a tray balloon when it is hidden. With **Save songs you play** on, anything heard long enough to count as listened lands in the folder on its own: fetched once per song, asked again on the next hearing if the fetch failed, never for songs skipped early and never while listening history is paused.
 
 **Music servers.** Open **Settings → Connections → Music server**, choose **Subsonic** (including Navidrome) or **Jellyfin**, and enter the server root address, username and password. One server account can be connected at a time; a "remember me" checkbox is offered where the platform can store credentials. Local playlists can mix YouTube, local and server songs; server playlists accept songs from that server only.
 
