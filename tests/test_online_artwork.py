@@ -49,7 +49,7 @@ class OnlineArtworkTests(unittest.TestCase):
 
     def test_cover_lookup_skips_the_album_page(self):
         calls=[]
-        def fetch(url,limit=0):
+        def fetch(url,limit=0,proxy=''):
             calls.append(url)
             if '/search?' in url:return json.dumps(dict(results=[self.candidate])).encode()
             raise AssertionError('a cover lookup must not fetch '+url)
@@ -76,8 +76,11 @@ class OnlineArtworkTests(unittest.TestCase):
                     'https://archive.org.evil.example/x', 'https://user@musicbrainz.org/x',
                     'https://musicbrainz.org:8443/x', 'https://itunes.apple.com/search?x=1']:
             with self.assertRaises(ValueError, msg=bad): art.safe_cover_url(bad)
-            with self.assertRaises(ValueError, msg=bad):
-                art.Redirects(art.safe_cover_url).redirect_request(None, None, 302, '', {}, bad)
+            # And the transport refuses the same hosts when a redirect points there.
+            from unittest.mock import MagicMock
+            redirect = MagicMock(status_code=302, headers={'Location': bad})
+            with patch('requests.get', return_value=redirect), self.assertRaises(ValueError, msg=bad):
+                art.fetch_cover('https://musicbrainz.org/ws/2/recording?query=x', 1024)
         # The two sides keep their own hosts: neither will follow into the other.
         with self.assertRaises(ValueError): art.safe_url('https://coverartarchive.org/x')
         with self.assertRaises(ValueError): art.safe_cover_url('https://itunes.apple.com/search')
@@ -108,7 +111,7 @@ class OnlineArtworkTests(unittest.TestCase):
         track = dict(title='A Song', artist='An Artist', seconds=200)
         front = 'https://coverartarchive.org/release-group/%s/front' % group
         def answer(recordings, image):
-            def fetch(url, limit):
+            def fetch(url, limit, proxy=''):
                 if 'musicbrainz.org' in url: return json.dumps(dict(recordings=recordings)).encode()
                 return image.read_bytes()
             return fetch
@@ -164,9 +167,13 @@ class OnlineArtworkTests(unittest.TestCase):
         self.assertEqual(art.album_motion(b'<html>No motion</html>',self.candidate),'')
 
     def test_urls_and_redirects(self):
+        from unittest.mock import MagicMock
         for url in ['http://music.apple.com/x','https://music.apple.com.evil/x','https://127.0.0.1/x','file:///tmp/x','https://user@music.apple.com/x','https://music.apple.com:444/x']:
             with self.assertRaises(ValueError): art.safe_url(url)
-            with self.assertRaises(ValueError): art.Redirects().redirect_request(None,None,302,'',{},url)
+            # The same guard stands between a redirect and the next request.
+            redirect = MagicMock(status_code=302, headers={'Location': url})
+            with patch('requests.get', return_value=redirect), self.assertRaises(ValueError):
+                art.fetch('https://itunes.apple.com/search?x=1')
 
     def test_variant_selection(self):
         raw=b'''#EXTM3U
@@ -237,7 +244,7 @@ large.m3u8
     def test_tall_request_falls_back_to_the_square_cover(self):
         video=self.root/'square.mp4'
         subprocess.run(['ffmpeg','-nostdin','-v','error','-f','lavfi','-i','testsrc2=size=256x256:rate=10:duration=0.5','-threads','1','-c:v','libx264',str(video)],capture_output=True,check=True)
-        def fetch(url,limit=0):
+        def fetch(url,limit=0,proxy=''):
             if '/search?' in url:return json.dumps(dict(results=[self.candidate])).encode()
             if 'music.apple.com/' in url:return self.page()
             if url.endswith('master.m3u8'):return b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=10000,CODECS="avc1.64001F",RESOLUTION=256x256\nvariant.m3u8\n'
@@ -268,7 +275,7 @@ large.m3u8
         video=self.root/'test.mp4'
         subprocess.run(['ffmpeg','-nostdin','-v','error','-f','lavfi','-i','testsrc2=size=128x128:rate=10:duration=0.5','-threads','1','-c:v','libx264',str(video)],capture_output=True,check=True)
         calls=[]
-        def fetch(url,limit=0):
+        def fetch(url,limit=0,proxy=''):
             calls.append(url)
             if '/search?' in url:return json.dumps(dict(results=[self.candidate])).encode()
             if 'music.apple.com/' in url:return self.page()
@@ -298,7 +305,7 @@ large.m3u8
         master=(b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=10000,CODECS="avc1.64001F",RESOLUTION=128x128\nsmall.m3u8\n'
                 b'#EXT-X-STREAM-INF:BANDWIDTH=8000000,CODECS="avc1.640032",RESOLUTION=1024x1024\nlarge.m3u8\n')
         calls=[]
-        def fetch(url,limit=0):
+        def fetch(url,limit=0,proxy=''):
             calls.append(url)
             if '/search?' in url:return json.dumps(dict(results=[self.candidate])).encode()
             if 'music.apple.com/' in url:return self.page()
@@ -328,7 +335,7 @@ large.m3u8
         def playlist(size):
             return b'#EXTM3U\n#EXT-X-MAP:URI="c.mp4",BYTERANGE="900@0"\n#EXTINF:30,\n#EXT-X-BYTERANGE:%d@900\nc.mp4\n#EXT-X-ENDLIST\n'%size
         fetched=[]
-        def fetch(url,limit=0):
+        def fetch(url,limit=0,proxy=''):
             fetched.append(url)
             if '/search?' in url:return json.dumps(dict(results=[self.candidate])).encode()
             if 'music.apple.com/' in url:return self.page()
@@ -435,14 +442,16 @@ large.m3u8
 
     def test_transport_size_caps(self):
         from unittest.mock import MagicMock
-        opener=MagicMock(); response=opener.open.return_value.__enter__.return_value
-        response.headers={'Content-Length':'999'}
-        with patch.object(art,'build_opener',return_value=opener):
-            with self.assertRaises(ValueError):art.fetch(self.base,10)
-            response.headers={};response.read.return_value=b'x'*11
-            with self.assertRaises(ValueError):art.fetch(self.base,10)
-            response.read.return_value=b'ok'
-            self.assertEqual(art.fetch(self.base,10),b'ok')
+        response = MagicMock(status_code=200, headers={'Content-Length': '999'})
+        response.ok = True
+        with patch('requests.get', return_value=response) as get:
+            with self.assertRaises(ValueError): art.fetch(self.base, 10)
+            self.assertEqual(get.call_args.kwargs['timeout'], 8)
+            self.assertEqual(get.call_args.kwargs['proxies'], {})
+            response.headers = {}; response.iter_content.return_value = [b'x' * 11]
+            with self.assertRaises(ValueError): art.fetch(self.base, 10)
+            response.iter_content.return_value = [b'ok']
+            self.assertEqual(art.fetch(self.base, 10), b'ok')
 
     def test_cache_disk_and_metadata_bounds(self):
         cache=self.root/'cache';cache.mkdir()

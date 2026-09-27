@@ -1,2 +1,5 @@
 ytmusicapi==1.12.3
 yt-dlp[default]==2026.8.19
+requests
+# SOCKS proxies (socks5://...) only work for requests when this is installed.
+PySocks==1.7.1

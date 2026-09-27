@@ -1,18 +1,18 @@
 """Best-effort public album artwork lookup. No credentials or persistent worker."""
 from fractions import Fraction
 from datetime import date
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import re
+import requests
 import subprocess
 import time
 import unicodedata
 from urllib.parse import urlencode, urljoin, urlsplit
-from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
 
 MEDIA_LIMIT = 16 * 1024 * 1024
 # Room for a few large covers beside the standard ones; the newest stay.
@@ -69,7 +69,7 @@ APPLE_ART = re.compile(r'^https://is\d+-ssl\.mzstatic\.com/image/thumb/[^?#@]+/\
 COVER_HOSTS = {'musicbrainz.org', 'coverartarchive.org'}
 ARCHIVE_HOST = re.compile(r'^(?:[a-z0-9-]+\.)*archive\.org$')
 # MusicBrainz asks every client to identify itself and to name a contact.
-COVER_AGENT = 'Sung/0.1.0 ( https://github.com/yappologistic/Sung )'
+COVER_AGENT = 'Sung/0.1.1 ( https://github.com/yappologistic/Sung )'
 # Its covers are scans people uploaded, so they run from postage stamps to
 # full sleeves. Below this a video frame is the better picture of the two.
 COVER_FLOOR = 500
@@ -91,44 +91,79 @@ def safe_cover_url(url):
     return url
 
 
-class Redirects(HTTPRedirectHandler):
-    def __init__(self, guard=None):
-        self.guard = guard or safe_url
+def proxy_url(proxy):
+    """One of the proxy strings the settings field accepts, normalized: a
+    scheme-less address counts as HTTP and the bare socks:// alias becomes
+    socks5://. The SOCKS support itself comes from PySocks, which requests
+    picks up automatically."""
+    proxy = str(proxy or '').strip()
+    if not proxy:
+        return ''
+    scheme = urlsplit(proxy).scheme
+    if not scheme:
+        return 'http://' + proxy
+    if scheme == 'socks':
+        return 'socks5://' + proxy.split('://', 1)[1]
+    return proxy
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return super().redirect_request(req, fp, code, msg, headers, self.guard(newurl))
+
+def proxy_map(proxy):
+    url = proxy_url(proxy)
+    return {'http': url, 'https': url} if url else {}
+
+
+def _download(url, guard, headers, timeout, proxies, limit, message):
+    """One GET, following only the redirects the guard accepts and returning
+    at most `limit` bytes. Connection failures surface as the URLError and
+    HTTP errors as the HTTPError the callers already handle."""
+    for _ in range(10):
+        guard(url)
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout,
+                                    proxies=proxies, allow_redirects=False, stream=True)
+        except requests.RequestException as error:
+            raise URLError(str(error) or error.__class__.__name__)
+        if response.status_code in (301, 302, 303, 307, 308) and response.headers.get('Location'):
+            url = urljoin(url, response.headers['Location'])
+            response.close()
+            continue
+        break
+    else:
+        raise ValueError('Too many redirects')
+    try:
+        if not response.ok:
+            raise HTTPError(response.url, response.status_code, str(response.reason or 'HTTP error'),
+                            response.headers, None)
+        if int(response.headers.get('Content-Length', 0) or 0) > limit:
+            raise ValueError(message)
+        chunks = []
+        total = 0
+        try:
+            for chunk in response.iter_content(131072):
+                total += len(chunk)
+                if total > limit:
+                    raise ValueError(message)
+                chunks.append(chunk)
+        except requests.RequestException as error:
+            raise URLError(str(error) or error.__class__.__name__)
+        return b''.join(chunks)
+    finally:
+        response.close()
 
 
 def fetch(url, limit=2 * 1024 * 1024, proxy=''):
-    handlers = [Redirects()]
-    if proxy:
-        # The player hands every helper request the proxy it was set to, and
-        # this lookup reaches the same internet the streams do; the same
-        # opener arrangement the lyric lookup uses sits underneath.
-        handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
-    with build_opener(*handlers).open(Request(safe_url(url), headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; Sung)', 'Accept-Encoding': 'identity'}), timeout=8) as response:
-        if int(response.headers.get('Content-Length', 0)) > limit:
-            raise ValueError('Artwork response too large')
-        data = response.read(limit + 1)
-        if len(data) > limit:
-            raise ValueError('Artwork response too large')
-        return data
+    # The player hands every helper request the proxy it was set to, and
+    # this lookup reaches the same internet the streams do; requests with
+    # PySocks is what the lyric and YouTube Music lookups sit on too.
+    return _download(url, safe_url, {'User-Agent': 'Mozilla/5.0 (compatible; Sung)',
+                                     'Accept-Encoding': 'identity'}, 8, proxy_map(proxy), limit,
+                     'Artwork response too large')
 
 
 def fetch_cover(url, limit, proxy=''):
     """The MusicBrainz and Cover Art Archive side, which has its own hosts."""
-    handlers = [Redirects(safe_cover_url)]
-    if proxy:
-        handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
-    with build_opener(*handlers).open(Request(safe_cover_url(url), headers={
-            'User-Agent': COVER_AGENT, 'Accept-Encoding': 'identity'}), timeout=10) as response:
-        if int(response.headers.get('Content-Length', 0)) > limit:
-            raise ValueError('Cover response too large')
-        data = response.read(limit + 1)
-        if len(data) > limit:
-            raise ValueError('Cover response too large')
-        return data
+    return _download(url, safe_cover_url, {'User-Agent': COVER_AGENT, 'Accept-Encoding': 'identity'},
+                     10, proxy_map(proxy), limit, 'Cover response too large')
 
 
 def image_size(data):

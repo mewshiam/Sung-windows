@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.1.0");
+  app.setApplicationVersion("0.1.1");
   app.setDesktopFileName("sung");
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same

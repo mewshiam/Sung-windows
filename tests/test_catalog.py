@@ -10,22 +10,22 @@ class CatalogTests(unittest.TestCase):
     def test_lyrics_fallback_matching_and_limits(self):
         from unittest.mock import patch, MagicMock
         import json, tempfile
-        from urllib.error import HTTPError
         req=dict(title='Song',artist='Artist',seconds=120)
         data=dict(trackName='Song',artistName='Artist',duration=120,syncedLyrics='[00:01] Hello')
-        response=MagicMock();response.__enter__.return_value=response
-        with patch('urllib.request.urlopen',return_value=response) as get:
-            response.read.return_value=json.dumps(data).encode()
+        response=MagicMock(status_code=200)
+        response.iter_content.return_value=[json.dumps(data).encode()]
+        with patch('requests.get',return_value=response) as get:
             self.assertEqual(catalog.lyric_fallback(req)['source'],'LRCLIB')
             self.assertEqual(get.call_args.kwargs['timeout'],8)
             for field,value in [('trackName','Song (Live)'),('artistName','Other'),('duration',124)]:
-                response.read.return_value=json.dumps({**data,field:value}).encode()
+                response.iter_content.return_value=[json.dumps({**data,field:value}).encode()]
                 self.assertIsNone(catalog.lyric_fallback(req))
-            response.read.return_value=b'x'*1048577
+            response.iter_content.return_value=[b'x'*1048577]
             self.assertIsNone(catalog.lyric_fallback(req))
         with tempfile.TemporaryDirectory() as cache:
             req['lyricCache']=cache
-            with patch('urllib.request.urlopen',side_effect=HTTPError('',429,'limit',{'Retry-After':'600'},None)) as get:
+            limited=MagicMock(status_code=429,headers={'Retry-After':'600'})
+            with patch('requests.get',return_value=limited) as get:
                 self.assertIsNone(catalog.lyric_fallback(req))
                 self.assertIsNone(catalog.lyric_fallback(req))
                 self.assertEqual(get.call_count,1)

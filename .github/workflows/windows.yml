@@ -148,7 +148,11 @@ jobs:
             "stage\Sung\helper\online_artwork.py",
             "stage\Sung\runtime\python.exe",
             "stage\Sung\runtime\Lib\site-packages\yt_dlp",
-            "stage\Sung\runtime\Lib\site-packages\ytmusicapi"
+            "stage\Sung\runtime\Lib\site-packages\ytmusicapi",
+            # The SOCKS half of the proxy support: without PySocks a
+            # socks5:// proxy fails every ytmusicapi request with
+            # "Missing dependencies for SOCKS support".
+            "stage\Sung\runtime\Lib\site-packages\socks.py"
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing from the package: $path" }

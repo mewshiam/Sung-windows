@@ -4,7 +4,7 @@ import io
 import json
 import re
 import sys
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlsplit
 
 # Windows hands a Python talking through pipes the ANSI code page (cp1252),
 # which cannot carry the Unicode inside song titles: the request's own query
@@ -74,6 +74,27 @@ def clean(items, kind='', parent=None):
     return [t for i in items if isinstance(i, dict) and (t := normalize(i, kind, parent))['id']]
 
 
+def proxy_url(proxy):
+    """One of the proxy strings the settings field accepts, normalized: a
+    scheme-less address counts as HTTP and the bare socks:// alias becomes
+    socks5://. The SOCKS support itself comes from PySocks, which requests
+    (and yt-dlp) pick up automatically."""
+    proxy = str(proxy or '').strip()
+    if not proxy:
+        return ''
+    scheme = urlsplit(proxy).scheme
+    if not scheme:
+        return 'http://' + proxy
+    if scheme == 'socks':
+        return 'socks5://' + proxy.split('://', 1)[1]
+    return proxy
+
+
+def proxy_map(proxy):
+    url = proxy_url(proxy)
+    return {'http': url, 'https': url} if url else {}
+
+
 def normalize_lyrics(data):
     from dataclasses import asdict, is_dataclass
     if is_dataclass(data): data=asdict(data)
@@ -94,9 +115,8 @@ def normalize_lyrics(data):
 def lyric_fallback(req):
     """Conservative exact lookup; never guess a live/remix version from its title."""
     import unicodedata
+    import requests
     from urllib.parse import urlencode
-    from urllib.request import Request, build_opener, ProxyHandler
-    from urllib.error import HTTPError
     from pathlib import Path
     import time
     duration = float(req.get('seconds') or 0)
@@ -113,26 +133,34 @@ def lyric_fallback(req):
         return ' '.join(unicodedata.normalize('NFKC', str(value)).casefold().split())
     params = dict(track_name=title, artist_name=artist, duration=duration)
     if req.get('album'): params['album_name'] = req['album']
-    request = Request('https://lrclib.net/api/get?' + urlencode(params), headers={'User-Agent': 'Sung/0.11.0 (native Linux music client)', 'Accept': 'application/json'})
     # An explicit proxy replaces the environment's idea of where to connect.
-    proxy = str(req.get('proxy') or '').strip()
-    opener = build_opener(ProxyHandler({'http': proxy, 'https': proxy})) if proxy else build_opener()
     try:
-        with opener.open(request, timeout=8) as response:
-            raw = response.read(1048577)
-            if len(raw) > 1048576: return None
-            data = json.loads(raw)
-    except HTTPError as exc:
-        if exc.code == 429 and blocked:
-            from email.utils import parsedate_to_datetime
-            retry = exc.headers.get('Retry-After', '600')
+        response = requests.get('https://lrclib.net/api/get?' + urlencode(params),
+                                headers={'User-Agent': 'Sung/0.1.1 ( https://github.com/yappologistic/Sung )',
+                                         'Accept': 'application/json'},
+                                timeout=8, proxies=proxy_map(req.get('proxy')), stream=True)
+    except requests.RequestException:
+        return None
+    try:
+        if response.status_code == 429 and blocked:
+            retry = response.headers.get('Retry-After', '600')
             try: delay = float(retry)
             except ValueError:
-                try: delay = parsedate_to_datetime(retry).timestamp() - time.time()
+                try:
+                    from email.utils import parsedate_to_datetime
+                    delay = parsedate_to_datetime(retry).timestamp() - time.time()
                 except (ValueError, TypeError): delay = 600
             cache.mkdir(parents=True, exist_ok=True)
             blocked.write_text(str(time.time()+max(1, delay)))
-        return None
+            return None
+        if response.status_code != 200: return None
+        raw = bytearray()
+        for chunk in response.iter_content(131072):
+            raw.extend(chunk)
+            if len(raw) > 1048576: return None
+        data = json.loads(bytes(raw))
+    finally:
+        response.close()
     if not isinstance(data, dict): return None
     if normal(data.get('trackName')) != normal(title) or normal(data.get('artistName')) != normal(artist): return None
     if abs(float(data.get('duration', 0))-duration) > 2: return None
@@ -372,8 +400,9 @@ def run(req):
     op = req.get('op', '')
     # Requests that must leave through a particular door all take this from
     # the C++ side: yt-dlp's proxy option, ytmusicapi's session, and the
-    # lyric lookup's opener. Empty means connect directly.
-    proxy = str(req.get('proxy') or '').strip()
+    # requests calls beneath the lyric and artwork lookups. Empty means
+    # connect directly.
+    proxy = proxy_url(req.get('proxy'))
     if op == 'choose-artwork':
         from pathlib import Path
         cover = Path(req.get('path',''))
@@ -431,7 +460,7 @@ def run(req):
     from ytmusicapi import YTMusic
     api = YTMusic(requests_session=True)
     if proxy:
-        api._session.proxies = {'http': proxy, 'https': proxy}
+        api._session.proxies = proxy_map(proxy)
     # Bound network calls; outer C++ watchdog also terminates stalled operations.
     api._session.request = _timeout_request(api._session.request, 8 if op == 'lyrics' else 20)
     if op == 'home':
