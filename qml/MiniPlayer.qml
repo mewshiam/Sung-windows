@@ -15,7 +15,11 @@ Window {
     width: 520; height: hasTimedLyrics?216:188
     minimumWidth: 520; maximumWidth: 520
     minimumHeight: hasTimedLyrics?216:188; maximumHeight: minimumHeight
-    color: Theme.background
+    // The frameless window itself is transparent, and the rounded card below
+    // is the whole shape of the player: its corners are the interface's own,
+    // and no square slab of window background reads as a black border around
+    // them.
+    color: "transparent"
     TrackPresentation { id: presentation }
     signal restoreRequested()
     Component.onCompleted: windowResources.manage(mini)
