@@ -6,6 +6,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+// EmptyWorkingSet is a PSAPI function. The default PSAPI_VERSION maps it to
+// the K32EmptyWorkingSet that lives in kernel32 itself, so no import library
+// beyond the usual ones is asked for.
+#include <psapi.h>
 #endif
 
 // glibc keeps what a program frees on its own free lists and gives memory back
