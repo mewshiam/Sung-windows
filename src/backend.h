@@ -6,6 +6,7 @@
 #include <QMediaPlayer>
 #include <QProcess>
 #include <QSettings>
+#include <QSet>
 #include <QFileInfo>
 #include <QTimer>
 #include <QTemporaryDir>
@@ -585,6 +586,11 @@ public:
   // A short form for the settings row: the folder's own name when it has one,
   // the whole path for a drive root.
   QString downloadFolderLabel() const {const auto name=QFileInfo(downloadFolder()).fileName();return name.isEmpty()?downloadFolder():name;}
+  // Songs heard far enough to count as listened are queued for the download
+  // folder on their own, one fetch per song however many times it is heard.
+  Q_PROPERTY(bool savePlayed READ savePlayed WRITE setSavePlayed NOTIFY settingsChanged)
+  bool savePlayed() const {return m_settings.value("savePlayed",false).toBool();}
+  void setSavePlayed(bool enabled) {if(savePlayed()==enabled)return;m_settings.setValue("savePlayed",enabled);emit settingsChanged();}
   bool downloading() const {return m_downloading;}
   QString downloadTitle() const {return m_downloading?m_downloadItem.value("title").toString():QString();}
   double downloadProgress() const {return m_downloadProgress;}
@@ -593,7 +599,7 @@ public:
   Q_INVOKABLE void clearKeptSongs();
   // Songs pulled from YouTube to the download folder, one helper at a time,
   // queued in the order they were asked for.
-  Q_INVOKABLE void downloadTracks(const QVariantList &items);
+  Q_INVOKABLE void downloadTracks(const QVariantList &items, bool announce = true);
   Q_INVOKABLE void cancelDownloads();
   Q_INVOKABLE void openDownloadFolder();
   // Overlap between one song and the next, in seconds. Zero plays them in turn.
@@ -811,6 +817,8 @@ private:
   int m_importTotal=0,m_importDone=0,m_importFailed=0;
   void cancelPreparation();
   void pumpDownloads();
+  void saveListened(const QVariantMap &track);
+  void rememberDownloaded(const QString &videoId);
   void applyLyrics(const QVariantMap &data);
   QVariantList libraryRows(const QString &kind) const;
   void cancel(const QString &channel);
@@ -833,6 +841,9 @@ private:
   QVariantMap m_downloadItem;
   bool m_downloading=false;
   double m_downloadProgress=0;
+  // Songs already fetched to the download folder, so a heard song saves
+  // itself once instead of at every hearing. Bounded like the history.
+  QSet<QString> m_downloadedIds;
   bool m_historyPaused = false;
   quint64 m_skipHistoryToken = 0, m_announcedToken = 0;
   Entries m_results, m_queue, m_listPane;

@@ -604,6 +604,11 @@ void Backend::considerScrobble() {
   if(position()<m_scrobbleThreshold)return;
   m_scrobbleSent=true;
   m_scrobbler.submit(current(),m_scrobbleStartedAt);
+  // Heard far enough to count: the same moment the scrobble leaves, the
+  // song may queue itself for the download folder, if the listener asked
+  // for that. A private session returns above, the same way it records
+  // nothing and reports nothing.
+  if(savePlayed())saveListened(current());
 }
 
 // --- Community skips and presence --------------------------------------------

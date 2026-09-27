@@ -135,6 +135,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   m_userVolume=qBound(0.0,m_settings.value("volume",0.65).toDouble(),1.0);
   m_offline.setBudget(qint64(keepPlayedMb())*1024*1024);
   m_videoCovers=m_settings.value("videoCovers").toMap();
+  const auto downloadedIds=m_settings.value("downloadedIds").toStringList();
+  m_downloadedIds=QSet<QString>(downloadedIds.cbegin(),downloadedIds.cend());
   m_audioA.setVolume(m_userVolume);
   m_audioB.setVolume(m_userVolume);
   m_deckA.setAudioOutput(&m_audioA);
@@ -1549,7 +1551,7 @@ void Backend::openDownloadFolder() {
   if (!QDir().mkpath(folder)) return;
   QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
 }
-void Backend::downloadTracks(const QVariantList &items) {
+void Backend::downloadTracks(const QVariantList &items, bool announce) {
   int queued = 0;
   for (const auto &entry : items) {
     const auto item = entry.toMap();
@@ -1568,10 +1570,33 @@ void Backend::downloadTracks(const QVariantList &items) {
     ++queued;
   }
   if (!queued) return;
-  emit toast(queued == 1 ? QStringLiteral("Queued for download")
-                         : QStringLiteral("%1 songs queued for download").arg(queued));
+  // The queue toast belongs to the hand that asked: the menu action says
+  // what it queued, while a song saving itself on being heard stays quiet
+  // here and lets the arrival toast and tray balloon speak for it.
+  if (announce)
+    emit toast(queued == 1 ? QStringLiteral("Queued for download")
+                           : QStringLiteral("%1 songs queued for download").arg(queued));
   emit downloadChanged();
   pumpDownloads();
+}
+// A song the listener has heard far enough to count as listened saves
+// itself here, the same files, tags and covers the Download action brings.
+// The ledger decides: a song already fetched asks nothing, one still in
+// flight is held back by the queue's own guard, and one that failed is not
+// in the ledger, so the next hearing asks again.
+void Backend::saveListened(const QVariantMap &track) {
+  const auto id = track.value("videoId").toString();
+  if (id.isEmpty() || m_downloadedIds.contains(id)) return;
+  downloadTracks(QVariantList{track}, false);
+}
+void Backend::rememberDownloaded(const QString &videoId) {
+  if (videoId.isEmpty()) return;
+  m_downloadedIds.insert(videoId);
+  // Roughly years of ordinary listening, then an arbitrary entry falls
+  // away: the bound keeps the setting small, and a forgotten song costs
+  // one fetch the next time it is heard.
+  while (m_downloadedIds.size() > 2000) m_downloadedIds.erase(m_downloadedIds.begin());
+  m_settings.setValue("downloadedIds", QStringList(m_downloadedIds.cbegin(), m_downloadedIds.cend()));
 }
 void Backend::pumpDownloads() {
   if (m_downloading || m_downloadQueue.isEmpty()) return;
@@ -1594,10 +1619,12 @@ void Backend::pumpDownloads() {
            {"cookies", cookies()}},
           [this](const QVariantMap &data) {
             const auto title = m_downloadItem.value("title").toString();
+            const auto videoId = m_downloadItem.value("videoId").toString();
             m_downloading = false;
             m_downloadProgress = 0;
             m_downloadItem = {};
             if (data.value("ok").toBool()) {
+              rememberDownloaded(videoId);
               emit toast("Downloaded · " + title);
               // Nothing else can carry the news while the window is hidden.
               if (!m_uiActive) m_notifier.show("Download complete", title);
