@@ -260,6 +260,62 @@ def cover_poster(cover, directory):
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return '', ''
 
+def save_name(text, limit=120):
+    """A display string as a filename. Windows forbids < > : " / \\ | ? *,
+    every filesystem dislikes control characters, and both dislike names
+    that end in a dot or a space."""
+    cleaned = ''.join(' ' if c in '<>:"/\\|?*' else c for c in str(text or ''))
+    cleaned = ''.join(c for c in cleaned if ord(c) >= 32)
+    return ' '.join(cleaned.split()).strip(' -.')[:limit].strip(' -.')
+
+
+def tag_download(path, req, proxy):
+    """Write the song's own tags onto the saved file with ffmpeg, and a cover
+    for containers that can carry one. Any failure leaves the untagged file
+    in place rather than losing the finished download."""
+    import shutil, subprocess
+    import requests
+    from pathlib import Path
+    path = Path(path)
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        return
+    tags = []
+    for key, value in [('title', req.get('title')), ('artist', req.get('artist')),
+                       ('album', req.get('album')), ('album_artist', req.get('albumArtist')),
+                       ('date', str(req.get('year') or ''))]:
+        text = str(value or '').strip()
+        if text:
+            tags += ['-metadata', f'{key}={text}']
+    if not tags:
+        return
+    tmp = path.with_suffix('.tagging' + path.suffix)
+    cover = None
+    try:
+        command = [ffmpeg, '-nostdin', '-y', '-i', str(path), '-map', '0', '-c', 'copy'] + tags
+        # WebM cannot carry attached art, and a broken lookup must not cost
+        # the download, so only an m4a whose cover actually arrived gains one.
+        if path.suffix.lower() == '.m4a' and req.get('thumb'):
+            try:
+                response = requests.get(req['thumb'], proxies=proxy_map(proxy), timeout=10)
+                response.raise_for_status()
+                if response.content:
+                    cover = path.with_suffix('.cover')
+                    cover.write_bytes(response.content)
+                    command += ['-i', str(cover), '-map', '1', '-disposition:1', 'attached_pic']
+            except Exception:
+                if cover is not None:
+                    cover.unlink(missing_ok=True)
+                    cover = None
+        command.append(str(tmp))
+        subprocess.run(command, capture_output=True, timeout=120, check=True)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+        if cover is not None:
+            cover.unlink(missing_ok=True)
+
+
 def scan_music_folders(req):
     import os
     from pathlib import Path
@@ -457,6 +513,46 @@ def run(req):
         if not info or not info.get('url'):
             raise RuntimeError('No playable audio stream returned')
         return {'url': info['url'], 'headers': info.get('http_headers', {}), 'seconds': info.get('duration', 0)}
+    if op == 'download':
+        import yt_dlp
+        vid = req['id']
+        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', vid):
+            raise ValueError('Invalid YouTube video ID')
+        from pathlib import Path
+        directory = Path(req['directory'])
+        directory.mkdir(parents=True, exist_ok=True)
+        base = ' - '.join(part for part in (save_name(req.get('artist')), save_name(req.get('title'))) if part) or vid
+        # yt-dlp expands its own %-fields inside the template, so a title that
+        # carries a literal percent sign has to have it doubled to survive.
+        def report(progress):
+            total = progress.get('total_bytes') or progress.get('total_bytes_estimate') or 0
+            if total:
+                pct = 100.0 * progress.get('downloaded_bytes', 0) / total
+                sys.stderr.write(json.dumps({'pct': round(pct, 1)}) + '\n')
+                sys.stderr.flush()
+        opts = {'quiet': True, 'noprogress': True, 'no_warnings': True, 'noplaylist': True,
+                'js_runtimes': {'node': {}}, 'socket_timeout': 18, 'retries': 2,
+                'extractor_retries': 2, 'cachedir': False,
+                'skip_download': False, 'max_filesize': 256*1024*1024,
+                'outtmpl': str(directory / (base.replace('%', '%%') + '.%(ext)s')),
+                'progress_hooks': [report]}
+        # A saved song wants the container every player opens: m4a first, then
+        # the Opus runs, capped to the saver rung when the user asked for that.
+        cap = '[abr<=80]' if req.get('quality', 'standard') == 'saver' else ''
+        opts['format'] = 'bestaudio[ext=m4a]%s/bestaudio[ext=webm]%s/bestaudio%s' % (cap, cap, cap)
+        if proxy: opts['proxy'] = proxy
+        if req.get('cookies'):
+            opts['cookiefile'] = req['cookies']
+        with yt_dlp.YoutubeDL(opts) as dl:
+            info = dl.extract_info('https://music.youtube.com/watch?v=' + vid, download=True)
+            path = Path(dl.prepare_filename(info))
+        if not path.is_file():
+            raise RuntimeError('Could not download this song')
+        try:
+            tag_download(path, req, proxy)
+        except Exception:
+            pass  # The song is saved; tags are a bonus, never the verdict.
+        return {'file': str(path), 'name': path.name, 'seconds': int(info.get('duration') or 0)}
     from ytmusicapi import YTMusic
     api = YTMusic(requests_session=True)
     if proxy:

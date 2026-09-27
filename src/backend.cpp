@@ -35,6 +35,8 @@
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QUuid>
+#include <QDesktopServices>
+#include <QUrl>
 #ifdef Q_OS_UNIX
 #include <signal.h>
 #include <fcntl.h>
@@ -401,7 +403,8 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
   }
   auto timer = new QTimer(p);
   timer->setSingleShot(true);
-  timer->setInterval((channel == "play" || channel == "prepare") ? 75000 : 45000);
+  timer->setInterval(channel == "download" ? 600000
+                     : (channel == "play" || channel == "prepare") ? 75000 : 45000);
   connect(timer, &QTimer::timeout, this, [this, channel, done] {
     cancel(channel);
     done({{"ok", false}, {"error", "Connection timed out. Try again."}});
@@ -439,6 +442,19 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
   childEnv.insert("PYTHONIOENCODING", "utf-8");
   childEnv.insert("PYTHONUTF8", "1");
   p->setProcessEnvironment(childEnv);
+  // yt-dlp reports the download's percent on stderr, one JSON object per
+  // line. Anything else a child writes there is not a report and is ignored.
+  if (channel == "download")
+    connect(p, &QProcess::readyReadStandardError, this, [this, p] {
+      const auto lines = p->readAllStandardError().split('\n');
+      for (const auto &line : lines) {
+        const auto report = QJsonDocument::fromJson(line).object();
+        if (report.contains("pct"))
+          m_downloadProgress =
+              qBound(0.0, report.value("pct").toDouble() / 100.0, 1.0);
+      }
+      if (m_downloading) emit downloadChanged();
+    });
   p->start(python, {helper});
   p->write(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact));
   p->closeWriteChannel();
@@ -1504,6 +1520,102 @@ void Backend::clearKeptSongs(){
   m_offline.clear();
   emit settingsChanged();
   emit toast("Kept songs cleared");
+}
+QString Backend::downloadFolder() const {
+  // A folder of its own inside the user's Music, which every platform's
+  // QStandardPaths knows; the setting only ever holds what the picker chose.
+  const auto fallback = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+  const auto base = !fallback.isEmpty() ? fallback : QDir::homePath();
+  return m_settings.value("downloadFolder", base + "/Sung").toString();
+}
+void Backend::setDownloadFolder(const QString &value) {
+  // The picker hands over a file URL; a typed path stays a path.
+  auto path = value.trimmed();
+  if (path.startsWith("file:", Qt::CaseInsensitive)) {
+    const QUrl url(path, QUrl::StrictMode);
+    if (!url.isValid() || !url.isLocalFile()) return;
+    path = url.toLocalFile();
+  }
+  path = QDir::fromNativeSeparators(path);
+  if (path.isEmpty() || downloadFolder() == path) return;
+  m_settings.setValue("downloadFolder", path);
+  emit settingsChanged();
+}
+void Backend::openDownloadFolder() {
+  const auto folder = downloadFolder();
+  if (!QDir().mkpath(folder)) return;
+  QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+void Backend::downloadTracks(const QVariantList &items) {
+  int queued = 0;
+  for (const auto &entry : items) {
+    const auto item = entry.toMap();
+    // Only YouTube songs have something to fetch; local and server rows are
+    // already files the user holds.
+    const auto id = item.value("videoId").toString();
+    if (id.isEmpty()) continue;
+    const auto sameSong = [&id](const QVariantMap &other) {
+      return other.value("videoId").toString() == id;
+    };
+    if ((m_downloading && sameSong(m_downloadItem)) ||
+        std::any_of(m_downloadQueue.cbegin(), m_downloadQueue.cend(),
+                    [&sameSong](const QVariant &pending) { return sameSong(pending.toMap()); }))
+      continue;
+    m_downloadQueue.append(item);
+    ++queued;
+  }
+  if (!queued) return;
+  emit toast(queued == 1 ? QStringLiteral("Queued for download")
+                         : QStringLiteral("%1 songs queued for download").arg(queued));
+  emit downloadChanged();
+  pumpDownloads();
+}
+void Backend::pumpDownloads() {
+  if (m_downloading || m_downloadQueue.isEmpty()) return;
+  m_downloadItem = m_downloadQueue.takeFirst().toMap();
+  m_downloading = true;
+  m_downloadProgress = 0;
+  emit downloadChanged();
+  QDir().mkpath(downloadFolder());
+  request("download",
+          {{"op", "download"},
+           {"id", m_downloadItem.value("videoId")},
+           {"directory", downloadFolder()},
+           {"title", m_downloadItem.value("title")},
+           {"artist", m_downloadItem.value("artist")},
+           {"album", m_downloadItem.value("album")},
+           {"albumArtist", m_downloadItem.value("albumArtist")},
+           {"year", m_downloadItem.value("year")},
+           {"thumb", m_downloadItem.value("art")},
+           {"quality", streamingQuality()},
+           {"cookies", cookies()}},
+          [this](const QVariantMap &data) {
+            const auto title = m_downloadItem.value("title").toString();
+            m_downloading = false;
+            m_downloadProgress = 0;
+            m_downloadItem = {};
+            if (data.value("ok").toBool()) {
+              emit toast("Downloaded · " + title);
+              // Nothing else can carry the news while the window is hidden.
+              if (!m_uiActive) m_notifier.show("Download complete", title);
+            } else if (!data.value("error").toString().isEmpty()) {
+              auto reason = data.value("error").toString();
+              reason.remove(QRegularExpression("\\x1b\\[[0-9;]*m"));
+              emit toast("Download failed · " + reason);
+            }
+            emit downloadChanged();
+            pumpDownloads();
+          });
+}
+void Backend::cancelDownloads() {
+  m_downloadQueue.clear();
+  m_downloading = false;
+  m_downloadProgress = 0;
+  m_downloadItem = {};
+  // cancel() disconnects the request's own callback, so the queue restarts
+  // from here rather than from the finished handler.
+  cancel("download");
+  emit downloadChanged();
 }
 void Backend::clearCache() {
   m_onlineArtworkTimer.stop();cancel("motion-artwork");++m_onlineArtworkGeneration;

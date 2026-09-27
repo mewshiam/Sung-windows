@@ -657,6 +657,33 @@ ApplicationWindow {
         y:window.immersive?(window.width<600?16:24)+(48-height)/2:window.height-height-128
         z:90
     }
+    // A download's progress while it runs, in the slot above the playback bar
+    // that the hud borrows for a moment. The hud only ever shows briefly, so
+    // the two meeting is rare and harmless.
+    Rectangle {
+        id: downloadPill
+        objectName: "downloadPill"
+        readonly property bool shown: app.downloading || app.downloadPending>0
+        anchors.horizontalCenter: parent.horizontalCenter
+        // The immersive player owns the bottom of the window, so the pill
+        // takes the hud's top slot there instead.
+        y: window.immersive?(window.width<600?72:80)+(48-height)/2:window.height-height-184
+        z: 90
+        width: Math.max(240,downloadContents.implicitWidth+40); height: 48; radius: Theme.shapeFull(48)
+        color: Theme.high
+        visible: opacity>0
+        opacity: shown?1:0
+        Behavior on opacity {NumberAnimation {duration:Theme.fast;easing.type:Easing.BezierSpline;easing.bezierCurve:Theme.fastEffectsCurve}}
+        Accessible.role: Accessible.AlertMessage; Accessible.name: downloadLabel.text
+        MElevation { anchors.fill: parent; radius: parent.radius; level: 3 }
+        RowLayout {
+            id:downloadContents; anchors.centerIn: parent; spacing: 12
+            Icon {name:"download";size:24;ink:Theme.primary}
+            SungText {id:downloadLabel;text:app.downloading?"Downloading · "+app.downloadTitle:app.downloadPending+" queued";color:Theme.text;font.pixelSize:Theme.titleMedium;typeRole:"titleMedium"}
+            MWavyProgress {progress:app.downloading && app.downloadProgress>0?app.downloadProgress:-1;Layout.preferredWidth:96}
+            MButton {objectName:"cancelDownloadsButton";symbol:"close";tip:"Cancel downloads";onClicked:app.cancelDownloads()}
+        }
+    }
     Drawer {
         id:immersiveQueue;objectName:"immersiveQueueSheet";edge:Qt.RightEdge
         // NavigationDrawer.kt:853-866 caps the modal container at the token.
@@ -2075,6 +2102,7 @@ ApplicationWindow {
         MMenuItem { symbol: "next"; text: "Play selected next"; onTriggered: app.enqueueItems(window.bulkView.selection.items(),true) }
         MMenuItem { symbol: "queue"; text: "Add selected to queue"; onTriggered: app.enqueueItems(window.bulkView.selection.items()) }
         MMenuItem { symbol: "plus"; text: "Add selected to playlist"; onTriggered: window.addBatch(window.bulkView) }
+        MMenuItem { objectName:"bulkDownloadAction"; symbol: "download"; text: "Download selected"; onTriggered: app.downloadTracks(window.bulkView.selection.items()) }
         MMenuItem { symbol: "remove"; text: "Remove selected"; visible: window.bulkView && (window.bulkView.queueMode || window.editableLocal || app.serverPlaylistEditable); onTriggered: window.bulkView.removeSelected() }
         MMenuItem { symbol: "check"; text: "Select all"; shortcut: "Ctrl+A"; onTriggered: window.bulkView.selection.selectAll() }
         MMenuItem { symbol: "close"; text: "Clear selection"; shortcut: "Esc"; onTriggered: window.bulkView.selection.clear() }
@@ -2086,6 +2114,7 @@ ApplicationWindow {
         MMenuItem { symbol: "next"; text: "Play next"; visible: !!(window.menuItem.videoId || window.menuItem.localPath || window.menuItem.serverSong); onTriggered: app.enqueue(window.menuItem,true) }
         MMenuItem { symbol: "queue"; text: "Add to queue"; visible: !!(window.menuItem.videoId || window.menuItem.localPath || window.menuItem.serverSong); onTriggered: app.enqueue(window.menuItem) }
         MMenuItem { symbol: "radio"; text: "Start radio"; visible: !!window.menuItem.videoId; onTriggered: app.radio(window.menuItem) }
+        MMenuItem { objectName:"downloadAction"; symbol: "download"; text: app.downloading && app.downloadTitle===window.menuItem.title?"Downloading\u2026":"Download"; visible: !!window.menuItem.videoId; onTriggered: app.downloadTracks([window.menuItem]) }
         MMenuItem { objectName: "trimAction"; symbol: "volume"; text: "Adjust volume\u2026"; visible: !!(window.menuItem.videoId || window.menuItem.localPath || window.menuItem.serverSong); onTriggered: trimDialog.adjust(window.menuItem) }
         MDivider { visible: !!(window.menuItem.videoId || window.menuItem.localPath || window.menuItem.serverSong); height: visible ? implicitHeight : 0 }
         MMenuItem { symbol: "heart"; text: app.isLiked(window.menuItem.id || "")?"Remove from liked songs":"Like song"; visible: !!(window.menuItem.videoId || window.menuItem.localPath || window.menuItem.serverSong); onTriggered: app.toggleLike(window.menuItem) }
@@ -2502,6 +2531,8 @@ ApplicationWindow {
                     SungText {objectName:"settingsLibraryHeading";heading: true;visible:!!settingsDialog.searchQuery.trim();text:"Library";font.pixelSize:Theme.titleLarge;emphasized: true;Layout.bottomMargin:8}
                     ColumnLayout {id:options2;objectName:"settingsRows2";Layout.fillWidth:true;Layout.minimumWidth:0;spacing:12
                 MSettingRow {opens:true;text:"Music folders";visible:settingsDialog.matches("Music folders import manage");onClicked:{settingsDialog.close();musicFoldersDialog.open();}}
+                MSettingRow {opens:true;objectName:"downloadFolderRow";text:"Downloads · "+app.downloadFolderLabel;visible:settingsDialog.matches("Downloads folder save location");onClicked:{settingsDialog.close();window.openFileDialog("download-folder");}}
+                MSettingRow {objectName:"openDownloadFolderRow";text:"Open downloads folder";visible:settingsDialog.matches("Open downloads folder show files");onClicked:app.openDownloadFolder()}
                 MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; text: "Update music folders automatically"; visible: settingsDialog.matches("Update music folders automatically watch"); checked: app.watchMusicFolders; onToggled: app.watchMusicFolders=checked }
                 SungText {text:"Start page";visible:settingsDialog.matches("Start page Home local music server liked");font.pixelSize:Theme.titleMedium;typeRole:"titleMedium"}
                 MSegmentedControl {Layout.fillWidth:true;Layout.minimumWidth:0;visible:settingsDialog.matches("Start page Home local music server liked");accessibleName:"Start page"; options:[{key:"home",label:"Home",name:"startPage_home"},{key:"files",label:"Local",name:"startPage_files"},{key:"server",label:"Server",name:"startPage_server"},{key:"favorites",label:"Liked",name:"startPage_favorites"}];value:app.startPage;onChosen:value=>app.startPage=value}

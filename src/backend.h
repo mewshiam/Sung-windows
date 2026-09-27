@@ -6,6 +6,7 @@
 #include <QMediaPlayer>
 #include <QProcess>
 #include <QSettings>
+#include <QFileInfo>
 #include <QTimer>
 #include <QTemporaryDir>
 #include <QThreadPool>
@@ -241,6 +242,14 @@ class Backend : public QObject {
   // they are using. Zero turns keeping off and empties the store.
   Q_PROPERTY(int keepPlayedMb READ keepPlayedMb WRITE setKeepPlayedMb NOTIFY settingsChanged)
   Q_PROPERTY(QString keptSongsSize READ keptSongsSize NOTIFY settingsChanged)
+  // Where menu downloads land. The setting only holds what the picker chose;
+  // empty falls back to Music/Sung.
+  Q_PROPERTY(QString downloadFolder READ downloadFolder WRITE setDownloadFolder NOTIFY settingsChanged)
+  Q_PROPERTY(QString downloadFolderLabel READ downloadFolderLabel NOTIFY settingsChanged)
+  Q_PROPERTY(bool downloading READ downloading NOTIFY downloadChanged)
+  Q_PROPERTY(QString downloadTitle READ downloadTitle NOTIFY downloadChanged)
+  Q_PROPERTY(double downloadProgress READ downloadProgress NOTIFY downloadChanged)
+  Q_PROPERTY(int downloadPending READ downloadPending NOTIFY downloadChanged)
   Q_PROPERTY(QStringList musicFolders READ musicFolders NOTIFY libraryChanged)
   Q_PROPERTY(bool cleanupBusy READ cleanupBusy NOTIFY cleanupChanged)
   Q_PROPERTY(QVariantList cleanupItems READ cleanupItems NOTIFY cleanupChanged)
@@ -564,8 +573,22 @@ public:
   void setStreamingQuality(const QString &value) { if(streamingQuality()==value || (value!="saver" && value!="standard"))return;m_settings.setValue("streamingQuality",value);emit settingsChanged(); }
   int keepPlayedMb() const {return qBound(0,m_settings.value("keepPlayedMb",1024).toInt(),65536);}
   void setKeepPlayedMb(int megabytes);
+  QString downloadFolder() const;
+  void setDownloadFolder(const QString &value);
+  // A short form for the settings row: the folder's own name when it has one,
+  // the whole path for a drive root.
+  QString downloadFolderLabel() const {const auto name=QFileInfo(downloadFolder()).fileName();return name.isEmpty()?downloadFolder():name;}
+  bool downloading() const {return m_downloading;}
+  QString downloadTitle() const {return m_downloading?m_downloadItem.value("title").toString():QString();}
+  double downloadProgress() const {return m_downloadProgress;}
+  int downloadPending() const {return m_downloadQueue.size();}
   QString keptSongsSize() const;
   Q_INVOKABLE void clearKeptSongs();
+  // Songs pulled from YouTube to the download folder, one helper at a time,
+  // queued in the order they were asked for.
+  Q_INVOKABLE void downloadTracks(const QVariantList &items);
+  Q_INVOKABLE void cancelDownloads();
+  Q_INVOKABLE void openDownloadFolder();
   // Overlap between one song and the next, in seconds. Zero plays them in turn.
   int crossfadeSeconds() const {return qBound(0,m_settings.value("crossfadeSeconds",0).toInt(),12);}
   void setCrossfadeSeconds(int seconds);
@@ -698,6 +721,7 @@ signals:
   void positionChanged();
   void lyricIndexChanged();
   void settingsChanged();
+  void downloadChanged();
   void libraryChanged();
   void lyricsChanged();
   void audioDevicesChanged();
@@ -779,6 +803,7 @@ private:
   QString m_relocateId;
   int m_importTotal=0,m_importDone=0,m_importFailed=0;
   void cancelPreparation();
+  void pumpDownloads();
   void applyLyrics(const QVariantMap &data);
   QVariantList libraryRows(const QString &kind) const;
   void cancel(const QString &channel);
@@ -795,6 +820,11 @@ private:
   QSettings m_settings;
   SystemTray m_tray;
   PlaybackNotifier m_notifier;
+  // One download at a time; the rest wait here in arrival order.
+  QVariantList m_downloadQueue;
+  QVariantMap m_downloadItem;
+  bool m_downloading=false;
+  double m_downloadProgress=0;
   bool m_historyPaused = false;
   quint64 m_skipHistoryToken = 0, m_announcedToken = 0;
   Entries m_results, m_queue, m_listPane;

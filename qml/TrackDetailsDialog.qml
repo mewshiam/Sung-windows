@@ -31,6 +31,11 @@ MDialog {
                             TextEdit { Layout.fillWidth: true; text: modelData.value; textFormat: TextEdit.PlainText; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.text; selectionColor: Theme.textSelection; selectedTextColor: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.bodyLarge; Accessible.name: modelData.label+": "+modelData.value }
                         }
                     }
+                    RowLayout {
+                        Layout.fillWidth: true; visible: !!dialog.inspectedTrack.videoId; spacing: 8
+                        MButton { objectName: "downloadFromDetails"; text: "Download"; symbol: "download"; tonal: true; onClicked: {app.downloadTracks([dialog.inspectedTrack]);dialog.close();} }
+                        MButton { objectName: "openDownloadsFromDetails"; text: "Open downloads folder"; symbol: "folder"; tonal: true; onClicked: app.openDownloadFolder() }
+                    }
                 }
             }
         }

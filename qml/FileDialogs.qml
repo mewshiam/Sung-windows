@@ -4,13 +4,14 @@ import QtQuick.Dialogs
 QtObject {
     id: dialogs
     required property Window ownerWindow
-    readonly property bool visible: m3uExportPicker.visible || m3uImportPicker.visible || playlistCoverPicker.visible || exportPicker.visible || importPicker.visible || cookiePicker.visible || lyricPicker.visible || audioPicker.visible || locatePicker.visible || folderPicker.visible || artworkPicker.visible
+    readonly property bool visible: m3uExportPicker.visible || m3uImportPicker.visible || playlistCoverPicker.visible || exportPicker.visible || importPicker.visible || cookiePicker.visible || lyricPicker.visible || audioPicker.visible || locatePicker.visible || folderPicker.visible || downloadFolderPicker.visible || artworkPicker.visible
     function open(kind) {
         if(kind === "playlist-cover") playlistCoverPicker.open();
         else if(kind === "artwork") {artworkPicker.songId=app.current.id || "";artworkPicker.open();}
         else if(kind === "m3u-export") {m3uExportPicker.playlistId=dialogs.ownerWindow.editPlaylistId;m3uExportPicker.open();}
         else if(kind === "m3u-import") m3uImportPicker.open();
         else if(kind === "folder") folderPicker.open();
+        else if(kind === "download-folder") downloadFolderPicker.open();
         else if(kind === "audio") audioPicker.open();
         else if(kind === "locate") {locatePicker.songId=app.current.id || "";locatePicker.songId=dialogs.ownerWindow.menuItem.id || locatePicker.songId;locatePicker.open();}
         else if(kind === "export") exportPicker.open();
@@ -25,6 +26,7 @@ QtObject {
     property FileDialog m3uImportPicker: FileDialog { objectName: "m3uImportPicker"; parentWindow: dialogs.ownerWindow; title: "Import playlist"; nameFilters: dialogs.playlistFilters; onAccepted: app.importPlaylistM3u(selectedFile) }
     readonly property var audioFilters: ["Audio files (*.mp3 *.flac *.ogg *.opus *.m4a *.aac *.wav *.aiff *.aif *.wma)"]
     property FolderDialog folderPicker: FolderDialog { objectName: "folderPicker"; parentWindow: dialogs.ownerWindow; title: "Add music folder"; onAccepted: dialogs.ownerWindow.finishFolderPick(selectedFolder); onRejected: dialogs.ownerWindow.returnToFolderEntry() }
+    property FolderDialog downloadFolderPicker: FolderDialog { objectName: "downloadFolderPicker"; parentWindow: dialogs.ownerWindow; title: "Choose download folder"; onAccepted: app.setDownloadFolder(selectedFolder) }
     property FileDialog audioPicker: FileDialog { objectName: "audioPicker"; parentWindow: dialogs.ownerWindow; title: "Add music"; fileMode: FileDialog.OpenFiles; nameFilters: dialogs.audioFilters; onAccepted: app.importLocalFiles(selectedFiles) }
     property FileDialog locatePicker: FileDialog { parentWindow: dialogs.ownerWindow; property string songId; title: "Locate audio file"; nameFilters: dialogs.audioFilters; onAccepted: app.locateLocalFile(selectedFile,songId) }
     property FileDialog exportPicker: FileDialog { parentWindow: dialogs.ownerWindow; objectName: "exportPicker"; title: "Export library"; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["Sung library (*.json)"]; onAccepted: app.exportLibrary(selectedFile) }
