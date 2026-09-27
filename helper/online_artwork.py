@@ -12,7 +12,7 @@ import subprocess
 import time
 import unicodedata
 from urllib.parse import urlencode, urljoin, urlsplit
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
 
 MEDIA_LIMIT = 16 * 1024 * 1024
 # Room for a few large covers beside the standard ones; the newest stay.
@@ -69,7 +69,7 @@ APPLE_ART = re.compile(r'^https://is\d+-ssl\.mzstatic\.com/image/thumb/[^?#@]+/\
 COVER_HOSTS = {'musicbrainz.org', 'coverartarchive.org'}
 ARCHIVE_HOST = re.compile(r'^(?:[a-z0-9-]+\.)*archive\.org$')
 # MusicBrainz asks every client to identify itself and to name a contact.
-COVER_AGENT = 'Sung/0.12.0 ( https://github.com/yappologistic/Sung )'
+COVER_AGENT = 'Sung/0.1.0 ( https://github.com/yappologistic/Sung )'
 # Its covers are scans people uploaded, so they run from postage stamps to
 # full sleeves. Below this a video frame is the better picture of the two.
 COVER_FLOOR = 500
@@ -99,8 +99,14 @@ class Redirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, self.guard(newurl))
 
 
-def fetch(url, limit=2 * 1024 * 1024):
-    with build_opener(Redirects()).open(Request(safe_url(url), headers={
+def fetch(url, limit=2 * 1024 * 1024, proxy=''):
+    handlers = [Redirects()]
+    if proxy:
+        # The player hands every helper request the proxy it was set to, and
+        # this lookup reaches the same internet the streams do; the same
+        # opener arrangement the lyric lookup uses sits underneath.
+        handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
+    with build_opener(*handlers).open(Request(safe_url(url), headers={
             'User-Agent': 'Mozilla/5.0 (compatible; Sung)', 'Accept-Encoding': 'identity'}), timeout=8) as response:
         if int(response.headers.get('Content-Length', 0)) > limit:
             raise ValueError('Artwork response too large')
@@ -110,9 +116,12 @@ def fetch(url, limit=2 * 1024 * 1024):
         return data
 
 
-def fetch_cover(url, limit):
+def fetch_cover(url, limit, proxy=''):
     """The MusicBrainz and Cover Art Archive side, which has its own hosts."""
-    with build_opener(Redirects(safe_cover_url)).open(Request(safe_cover_url(url), headers={
+    handlers = [Redirects(safe_cover_url)]
+    if proxy:
+        handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
+    with build_opener(*handlers).open(Request(safe_cover_url(url), headers={
             'User-Agent': COVER_AGENT, 'Accept-Encoding': 'identity'}), timeout=10) as response:
         if int(response.headers.get('Content-Length', 0)) > limit:
             raise ValueError('Cover response too large')
@@ -190,7 +199,7 @@ def album_key(value):
     return normal(re.sub(r"\s*[\[(](?:deluxe(?: edition| video album)?|expanded edition)[\])]\s*$", '', str(value), flags=re.I))
 
 
-def resolve_candidates(track, results):
+def resolve_candidates(track, results, proxy=''):
     exact = candidates(track, results)
     if exact:
         return exact
@@ -207,12 +216,12 @@ def resolve_candidates(track, results):
             and str(i.get('collectionId', '')).isdigit()))[:2]
         if not ids:
             query = urlencode(dict(term=track['artist']+' '+track['album'], media='music', entity='album', limit=20, country='us'))
-            albums = json.loads(fetch('https://itunes.apple.com/search?'+query)).get('results', [])
+            albums = json.loads(fetch('https://itunes.apple.com/search?'+query, proxy=proxy)).get('results', [])
             ids = list(dict.fromkeys(str(i['collectionId']) for i in albums
                 if normal(i.get('artistName', '')) == artist and normal(i.get('collectionName', '')) == album
                 and str(i.get('collectionId', '')).isdigit()))[:2]
         for album_id in ids:
-            tracks = json.loads(fetch('https://itunes.apple.com/lookup?'+urlencode(dict(id=album_id, entity='song', limit=200, country='us')))).get('results', [])
+            tracks = json.loads(fetch('https://itunes.apple.com/lookup?'+urlencode(dict(id=album_id, entity='song', limit=200, country='us')), proxy=proxy)).get('results', [])
             found = candidates(track, tracks[:201])
             if found:
                 return found
@@ -226,7 +235,7 @@ def resolve_candidates(track, results):
     ids = list(by_id)[:8]
     if not ids:
         return []
-    albums = json.loads(fetch('https://itunes.apple.com/lookup?'+urlencode(dict(id=','.join(ids), entity='album', country='us')))).get('results', [])
+    albums = json.loads(fetch('https://itunes.apple.com/lookup?'+urlencode(dict(id=','.join(ids), entity='album', country='us')), proxy=proxy)).get('results', [])
     dated = []
     for album in albums:
         song = by_id.get(str(album.get('collectionId', '')))
@@ -255,7 +264,7 @@ def still_art(candidate):
     return url if APPLE_ART.match(url) else ''
 
 
-def archive_cover(track):
+def archive_cover(track, proxy=''):
     """The album cover the Cover Art Archive holds for this recording, or ''.
 
     The same rule as the Apple side decides what counts as the right recording:
@@ -269,7 +278,7 @@ def archive_cover(track):
         return ''
     query = urlencode({'query': 'artist:"%s" AND recording:"%s"' % (lucene(artist), lucene(title)),
                        'fmt': 'json', 'limit': 8})
-    found = json.loads(fetch_cover('https://musicbrainz.org/ws/2/recording?' + query, 262144))
+    found = json.loads(fetch_cover('https://musicbrainz.org/ws/2/recording?' + query, 262144, proxy))
     groups = []
     for recording in found.get('recordings', [])[:8]:
         if normal(recording.get('title', '')) != normal(title):
@@ -286,7 +295,7 @@ def archive_cover(track):
     for group in groups[:3]:
         url = 'https://coverartarchive.org/release-group/%s/front' % group
         try:
-            size = image_size(fetch_cover(url, 262144))
+            size = image_size(fetch_cover(url, 262144, proxy))
         except HTTPError as error:
             if error.code in (404, 400):
                 continue
@@ -429,6 +438,7 @@ def lookup(req):
     scratch.mkdir(parents=True, exist_ok=True, mode=0o700)
     motion = bool(req.get('motion', True))
     covers = bool(req.get('covers', True))
+    proxy = str(req.get('proxy') or '').strip()
     quality = req.get('quality') if req.get('quality') in QUALITIES else 'standard'
     q = QUALITIES[quality]
     earlier = {}
@@ -463,7 +473,7 @@ def lookup(req):
             return {'status': 'retry', 'retryAfter': max(1, math.ceil(float(blocked.read_text())-now))}
         query = urlencode({'term': re.sub(r'\s+- Topic$', '', req.get('artist', ''), flags=re.I) + ' ' + title_key(req.get('title', '')), 'media': 'music',
                            'entity': 'song', 'limit': 40, 'country': 'us'})
-        matches = resolve_candidates(req, json.loads(fetch('https://itunes.apple.com/search?' + query)).get('results', []))
+        matches = resolve_candidates(req, json.loads(fetch('https://itunes.apple.com/search?' + query, proxy=proxy)).get('results', []), proxy)
         for candidate in matches:
             # The first verified match names the still cover and the album page; an
             # animated match below replaces both with its own album's.
@@ -475,7 +485,7 @@ def lookup(req):
             # Apple knows nothing about a good deal of what plays here: game
             # soundtracks, fan uploads, releases that never reached a store.
             # MusicBrainz and its Cover Art Archive carry some of them.
-            result['art'] = archive_cover(req)
+            result['art'] = archive_cover(req, proxy)
             if result['art']:
                 saved['expires'] = now + 7 * 86400
         for candidate in (matches if motion else []):
@@ -489,23 +499,23 @@ def lookup(req):
                     except (ValueError, ZeroDivisionError, subprocess.SubprocessError):
                         path.unlink()
                 if not cached_movie(path, limit=q['limit']):
-                    raw_page = fetch(page)
+                    raw_page = fetch(page, proxy=proxy)
                     master, streams = album_motion(raw_page, candidate, q['shape']), quality
                     if not master and q['shape'] == 'tall':
                         master, streams = album_motion(raw_page, candidate), q['square']
                     if not master:
                         continue
                     url = ''
-                    for variant in variants(fetch(master, 262144), master, streams)[:4]:
+                    for variant in variants(fetch(master, 262144, proxy), master, streams)[:4]:
                         try:
-                            url = movie_url(fetch(variant, 262144), variant, q['limit'])
+                            url = movie_url(fetch(variant, 262144, proxy), variant, q['limit'])
                             break
                         except ValueError:
                             continue
                     if not url:
                         continue
                     temp = scratch / 'cover.mp4'
-                    temp.write_bytes(fetch(url, q['limit']))
+                    temp.write_bytes(fetch(url, q['limit'], proxy))
                     validate_movie(temp, quality)
                     # A complete silent MP4 needs no transcoding or second decoder.
                     os.replace(temp, path)
