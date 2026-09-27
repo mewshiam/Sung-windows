@@ -1,3 +1,9 @@
+#include <QtGlobal>
+#ifdef Q_OS_WIN
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 #include "backend.h"
 #include "rowselection.h"
 #include "desktoptheme.h"
@@ -41,6 +47,8 @@
 void runBenchmark(Backend *, QQuickWindow *);
 #endif
 #include <cstdio>
+#include <thread>
+#include <chrono>
 #include <algorithm>
 #include <functional>
 #include <optional>
@@ -131,7 +139,7 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.1.1");
+  app.setApplicationVersion("0.1.2");
   app.setDesktopFileName("sung");
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
@@ -146,7 +154,7 @@ int main(int argc, char **argv) {
 #endif
   const auto args = app.arguments();
   if (args.contains("--version")) {
-    fprintf(stdout, "Sung 0.12.0\n");
+    fprintf(stdout, "Sung %s\n", qPrintable(QCoreApplication::applicationVersion()));
     return 0;
   }
   QLocalSocket peer;
@@ -541,5 +549,23 @@ int main(int argc, char **argv) {
                        [window, path] { window->grabWindow().save(path); });
     QTimer::singleShot(3000, &app, &QCoreApplication::quit);
   }
+  // A teardown that never comes back would leave a process with no windows
+  // and an icon in the tray, which reads to the user as "Sung will not
+  // close" - the exit depends on every destructor cooperating. The watchdog
+  // ends the process for good a few seconds after the event loop has
+  // stopped, whatever the destructors are still doing. A normal exit never
+  // reaches it.
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [] {
+    std::thread([] {
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      std::fputs("Sung did not tear down in time; ending the process\n", stderr);
+      std::fflush(stderr);
+#ifdef Q_OS_WIN
+      TerminateProcess(GetCurrentProcess(), 0);
+#else
+      _Exit(0);
+#endif
+    }).detach();
+  });
   return app.exec();
 }

@@ -89,7 +89,18 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   connect(&m_tray,&SystemTray::playPauseRequested,this,&Backend::toggle);
   connect(&m_tray,&SystemTray::nextRequested,this,&Backend::next);
   connect(&m_tray,&SystemTray::previousRequested,this,&Backend::previous);
-  connect(&m_tray,&SystemTray::quitRequested,this,[](){QCoreApplication::quit();});
+  connect(&m_tray,&SystemTray::quitRequested,this,[this](){
+    // Ending Sung from the tray has to end the whole process, whatever the
+    // window, the decks and the helpers are doing - a tray quit is exactly
+    // the moment when all of that is still running behind a hidden window.
+    // Pausing lets the media stack wind down while the loop is still alive,
+    // cancelling the helpers closes the pipes they hold, and dropping the
+    // icon first leaves no ghost behind even if the exit turns out forceful.
+    pause();
+    for (const auto &key : m_processes.keys()) cancel(key);
+    m_tray.setKept(false);
+    QCoreApplication::exit(0);
+  });
   connect(this,&Backend::playbackChanged,this,[this]{m_tray.setPlaying(playing());});
   updateTray();
   eachDeck([this](QMediaPlayer *deck){
@@ -1497,8 +1508,10 @@ void Backend::save() {
   if(!m_storageHealthy)return;
   // Whoever asks by name wants the file now: tests reading it back, and the
   // last save before exit. A background write still under way goes first, so
-  // the state taken here is the one that lands last.
-  m_saver.waitForDone();
+  // the state taken here is the one that lands last. The wait is bounded, so
+  // a wedged write cannot hold the whole exit hostage; the write below then
+  // lands the state it took.
+  m_saver.waitForDone(10000);
   QDir().mkpath(dataPath());
   if (!writeLibrary(dataPath() + "/library.json", libraryDocument()))
     notifyError("Could not save your library.");
