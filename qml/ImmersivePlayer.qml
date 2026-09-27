@@ -147,6 +147,16 @@ Item {
     signal motionLyricsRequested(bool enabled)
     property bool motionLyrics: true
     readonly property bool motionLyricShown: motionLayout && motionLyrics && hasTimedLyrics
+    // The visualizer's little lyrics: the line being sung, one small row
+    // under the ring, so the words stay with the sound without leaving it
+    // for the lyrics layout. A choice in the menu, kept like Motion's.
+    signal visualizerLyricsRequested(bool enabled)
+    property bool visualizerLyrics: true
+    // Where the lyrics column sits when the lyrics have the screen: to the
+    // left, centred (the default) or to the right. A choice in the menu and
+    // the Lyrics dialog, kept like the layout itself.
+    signal lyricsPositionRequested(string position)
+    property string lyricsPosition: "center"
     // ImmersiveCoverflow.qml:16-20 computes this row from the window height.
     // The duplicate measure is needed before its Loader exists; reading the
     // loaded item's height here makes coverflowVisible depend on itself.
@@ -287,6 +297,39 @@ Item {
                                 MShape {objectName:"immersiveArtworkFocusRing";anchors.fill:parent;anchors.margins:-Theme.focusRingOutset;visible:!!immersiveArt.shape && parent.parent.visualFocus;shape:immersiveArt.shape||"circle";toShape:immersiveArt.toShape;progress:immersiveArt.morph;color:"transparent";strokeColor:Theme.focusRing;strokeWidth:Theme.focusRingWidth}
                             }}
                     }
+                }
+                // The little lyrics: the line being sung, one small row
+                // between the ring and the title. It takes its own room, so
+                // the cover yields a step instead of the words drawing over
+                // the picture, and it exists only where a visualizer does.
+                Item {
+                    id: visualizerLyric
+                    objectName: "visualizerLyricSlot"
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Math.min(player.lyricMeasure, coverColumn.width)
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredHeight: visible ? 28 : 0
+                    visible: player.visualizing && player.visualizerLyrics && player.hasTimedLyrics && !player.coverHidden
+                    property string incoming: app.lyricIndex>=0 && app.lyricLines.length>app.lyricIndex ? String(app.lyricLines[app.lyricIndex].text||"").trim() : ""
+                    property string shown: ""
+                    property string previous: ""
+                    property real progress: 1
+                    readonly property bool animate: app.motion && player.visible
+                    function settle(){tickFade.stop();shown=incoming;previous="";progress=1;}
+                    onIncomingChanged:{
+                        tickFade.stop();
+                        if(!animate || !shown || !incoming){settle();return;}
+                        previous=shown;shown=incoming;progress=0;tickFade.start();
+                    }
+                    onAnimateChanged: if(!animate)settle()
+                    onVisibleChanged: if(visible)settle()
+                    Component.onCompleted: settle()
+                    // One line leaves before the next arrives, the same swap
+                    // the mini player's lyric row makes: FastEffects cannot
+                    // overshoot into a flash between two lines of one voice.
+                    NumberAnimation {id:tickFade;target:visualizerLyric;property:"progress";to:1;duration:Theme.normal;easing.type:Easing.BezierSpline;easing.bezierCurve:Theme.effectsCurve;onFinished:visualizerLyric.previous=""}
+                    SungText {anchors.fill:parent;text:visualizerLyric.previous;opacity:1-visualizerLyric.progress;horizontalAlignment:Text.AlignHCenter;elide:Text.ElideRight;font.pixelSize:Theme.bodyLarge;color:Theme.primary;Accessible.ignored:true}
+                    SungText {objectName:"visualizerLyricLine";anchors.fill:parent;text:visualizerLyric.shown;opacity:visualizerLyric.progress;horizontalAlignment:Text.AlignHCenter;elide:Text.ElideRight;font.pixelSize:Theme.bodyLarge;color:Theme.primary;Accessible.name:text}
                 }
                 // The line being sung, over the picture. It hangs from just
                 // above the title and grows upward into the empty cover slot,
@@ -443,7 +486,8 @@ Item {
             Item {Layout.fillWidth:true;visible:player.coverAlone}
             // Matching flexible space centres the measure when it fits. On a
             // narrower window, lyrics fill the content width without gutters.
-            Item { Layout.fillWidth: true; visible: player.displayedLayout==="lyrics" && body.lyricMeasureFits }
+            // A chosen side lets its gutter go, so the column hugs that edge.
+            Item { Layout.fillWidth: true; visible: player.displayedLayout==="lyrics" && body.lyricMeasureFits && player.lyricsPosition!=="left" }
             // Beside the cover, the line being sung sits level with the
             // cover's middle, where the eye already is.
             Item { Layout.fillWidth: true; visible: player.motionLayout }
@@ -452,7 +496,7 @@ Item {
                 Layout.preferredWidth: player.displayedLayout==="lyrics" ? (body.lyricMeasureFits ? player.lyricMeasure : shell.width) : -1
                 Layout.maximumWidth: player.displayedLayout==="lyrics" ? (body.lyricMeasureFits ? player.lyricMeasure : shell.width) : Infinity
                 Layout.alignment: Qt.AlignHCenter }
-            Item { Layout.fillWidth: true; visible: player.displayedLayout==="lyrics" && body.lyricMeasureFits }
+            Item { Layout.fillWidth: true; visible: player.displayedLayout==="lyrics" && body.lyricMeasureFits && player.lyricsPosition!=="right" }
             SingAlong { id: immersiveSingAlong; visible:player.displayedLayout==="singalong"; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.fillHeight: true; Layout.minimumHeight: 0 }
         }
         Item {
@@ -577,6 +621,16 @@ Item {
         // named a different one.
         MMenuItem {objectName:"immersiveSpeed";symbol:"speed";text:"Playback speed · "+Number(app.playbackRate.toFixed(2))+"×";onTriggered:player.speedRequested()}
         MMenuItem {objectName:"immersiveTiming";symbol:"settings";text:"Lyric timing";enabled:app.lyricLines.length>0;onTriggered:player.timingRequested()}
+        MDivider {}
+        // Where the lyrics column sits when the lyrics have the screen. Three
+        // items read as one choice: each checks only while it is the one in
+        // force.
+        MMenuItem {objectName:"immersiveLyricsLeft";text:"Lyrics to the left";checkable:true;checked:player.lyricsPosition==="left";enabled:player.hasLyrics;onTriggered:player.lyricsPositionRequested("left")}
+        MMenuItem {objectName:"immersiveLyricsCentre";text:"Lyrics centred";checkable:true;checked:player.lyricsPosition==="center";enabled:player.hasLyrics;onTriggered:player.lyricsPositionRequested("center")}
+        MMenuItem {objectName:"immersiveLyricsRight";text:"Lyrics to the right";checkable:true;checked:player.lyricsPosition==="right";enabled:player.hasLyrics;onTriggered:player.lyricsPositionRequested("right")}
+        // Only the visualizer draws this row, so only there is this a choice
+        // to make.
+        MMenuItem {objectName:"immersiveVisualizerLyrics";text:"Lyrics in visualizer";checkable:true;checked:player.visualizerLyrics;enabled:player.visualizing;onTriggered:player.visualizerLyricsRequested(!player.visualizerLyrics)}
         MDivider {}
         // Only Motion draws lyrics over its picture, so only there is this
         // a choice to make.

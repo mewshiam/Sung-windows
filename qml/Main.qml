@@ -206,7 +206,7 @@ ApplicationWindow {
     TrackPresentation { id: nowPresentation; visible: !window.immersive && !window.compactMode }
     property real previousVolume: 0.65
     function toggleMute() { if(app.volume>0){previousVolume=app.volume;app.volume=0;}else app.volume=previousVolume; }
-    Settings { id: listeningSettings; category: "Listening"; property string layout: "split"; property bool autoHide: false; property bool coverflow: false; property bool motionLyrics: true }
+    Settings { id: listeningSettings; category: "Listening"; property string layout: "split"; property bool autoHide: false; property bool coverflow: false; property bool motionLyrics: true; property bool visualizerLyrics: true; property string lyricsPosition: "center" }
     property string immersiveReturnView: ""
     function openImmersiveCollection(item) {
         if(!item.kind)return;
@@ -654,6 +654,10 @@ ApplicationWindow {
                 coverflow:listeningSettings.coverflow
                 motionLyrics:listeningSettings.motionLyrics
                 onMotionLyricsRequested:enabled=>listeningSettings.motionLyrics=enabled
+                visualizerLyrics:listeningSettings.visualizerLyrics
+                onVisualizerLyricsRequested:enabled=>listeningSettings.visualizerLyrics=enabled
+                lyricsPosition:listeningSettings.lyricsPosition
+                onLyricsPositionRequested:position=>listeningSettings.lyricsPosition=position
                 onCoverflowRequested:enabled=>listeningSettings.coverflow=enabled
                 onAutoHideRequested:enabled=>listeningSettings.autoHide=enabled
                 onLayoutRequested:layout=>listeningSettings.layout=layout
@@ -2865,6 +2869,18 @@ ApplicationWindow {
                 MButton { text: "Use automatic"; visible: app.lyricsSource==="Imported LRC"; onClicked: app.resetLyrics() }
             }
             MSwitch { objectName: "completedLyricsSwitch"; text: "Show completed lines"; checked: app.keepCompletedLyrics; onToggled: app.keepCompletedLyrics=checked; Layout.fillWidth: true }
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 8
+                SungText { text: "Position in full screen"; Layout.fillWidth: true }
+                MSegmentedControl {
+                    objectName: "lyricsPositionControl"
+                    Layout.alignment: Qt.AlignHCenter
+                    options: [{key:"left",label:"Left",name:"lyricsPositionLeft"},{key:"center",label:"Centre",name:"lyricsPositionCentre"},{key:"right",label:"Right",name:"lyricsPositionRight"}]
+                    value: listeningSettings.lyricsPosition
+                    onChosen: key=>listeningSettings.lyricsPosition=key
+                    accessibleName: "Lyrics position in full screen"
+                }
+            }
             SungText { text: (app.lyricOffset>0?"+":"")+(app.lyricOffset/1000).toFixed(2)+" s"; font.pixelSize: Theme.headlineMedium; Layout.alignment: Qt.AlignHCenter }
             SettingSlider { objectName: "lyricTimingSlider"; from: -10000; to: 10000; stepSize: 250; value: app.lyricOffset; Layout.fillWidth: true; onMoved: app.lyricOffset=value; Accessible.name: "Lyric timing; positive shows lyrics earlier" }
             RowLayout {
