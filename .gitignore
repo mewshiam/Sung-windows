@@ -13,7 +13,6 @@
 !/src/
 !/qml/
 !/helper/
-!/scripts/
 !/tests/
 !/assets/
 !/licenses/
@@ -28,8 +27,6 @@
 !/helper/catalog.py
 !/helper/online_artwork.py
 !/helper/requirements.txt
-/scripts/*
-!/scripts/*.sh
 /tests/*
 !/tests/*.cpp
 !/tests/*.h
@@ -38,7 +35,6 @@
 !/assets/readme-now-playing.png
 !/assets/sung.png
 !/assets/sung.ico
-!/assets/sung.desktop
 !/assets/icons/
 /assets/icons/*
 !/assets/icons/*.svg

@@ -2,24 +2,24 @@
 
 <img src="assets/readme-now-playing.png" alt="Sung playing a song, the cover in a flower shape ringed by the visualizer" width="100%">
 
-
 # Sung for Windows
 
 **YouTube Music, your music files, and your music server. Native, portable, no browser.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)
-![Linux](https://img.shields.io/badge/platform-Linux-blue.svg)
 ![Qt 6](https://img.shields.io/badge/built_with-Qt_6-41CD52.svg)
 
 [Download](#install-on-windows) · [What this build adds](#what-this-build-adds) · [Features](#features) · [Build from source](#build-from-source) · [Troubleshooting](#troubleshooting)
 
 </div>
 
-> **About this repository.** [Sung](https://github.com/yappologistic/Sung) is a beautiful, minimal Material 3 player written in C++ and Qt Quick by [**@yappologistic**](https://github.com/yappologistic). All credit for the player belongs to them — go there for the original Linux project, and consider [buying them a coffee](https://buymeacoffee.com/e_gurl). This repository packages that player for Windows as a portable zip and adds three small community features on top. Everything else here is Sung, unchanged.
+> Sung is a beautiful, minimal Material 3 player written in C++ and Qt Quick by [**@yappologistic**](https://github.com/yappologistic) — all credit for the player is theirs: [github.com/yappologistic/Sung](https://github.com/yappologistic/Sung). This repository packages it for Windows.
 
 ## What this build adds
 
+- **System tray** — optionally keep Sung in the notification area: **minimize to tray** tucks the window away while the music plays, and **close to tray** leaves it running when the window is closed, so quitting is a choice made from the tray icon's menu (Open, Play/Pause, Previous, Next, Quit). Both live under **Settings → Connections → System tray**.
+- **Window memory** — the window comes back the size, position and maximized state it was left in; a first run opens centred on the screen.
 - **SponsorBlock** — sponsor reads, self-promotion, long intros and other non-music segments are skipped automatically, using community timings from [sponsor.ajay.app](https://sponsor.ajay.app). Off by default; turn it on under **Settings → Playback → Skip non-music segments**. While the switch is off, nothing is sent anywhere.
 - **Discord Rich Presence** — the playing track appears on your Discord profile with its cover, elapsed time and a button back to the song, through Discord's own local pipe connection. No token, no extra account, no third-party service. Off by default; enable under **Settings → Connections → Discord**.
 - **Proxy support** — every outbound request (YouTube Music, yt-dlp, lyrics, artwork, SponsorBlock) can go through an HTTP or SOCKS5 proxy under **Settings → Connections → Network**, for example `http://127.0.0.1:8080` or `socks5://host:1080`.
@@ -47,10 +47,10 @@ Sung\
 
 ### Notes and limitations on Windows
 
-- **Media keys and the system media flyout** are not wired up yet — Windows has no D-Bus for MPRIS, so all playback control lives in the app itself (the mini player included). WinRT's `SystemMediaTransportControls` is the natural next step.
-- **Now-playing notifications** appear as tray balloon toasts; the tray icon exists only while a toast can show and hides again when playback pauses.
-- **"Remember me" for server logins** degrades to a per-session sign-in with a clear message from the app (Linux stores these in the system keyring via `secret-tool`, which has no Windows CLI equivalent).
-- **Pause on headphone disconnect**: the PulseAudio fine-tuning is skipped; a vanished audio device still pauses playback through Qt's own device notifications.
+- **Media keys and the system media flyout** are not wired up yet — playback control lives in the app itself, the tray icon included. WinRT's `SystemMediaTransportControls` is the natural next step.
+- **Now-playing notifications** appear as tray balloon toasts on the tray icon, whenever that exists: a toast, or one of the tray options, puts it there.
+- **"Remember me" for server logins** degrades to a per-session sign-in with a clear message from the app.
+- **Pause on headphone disconnect**: a vanished audio device pauses playback through Qt's own device notifications.
 - The **single-instance guard** uses a named pipe derived from your profile path, so two Windows users each get their own instance, and double-clicking the exe again raises the existing window.
 - Song titles and searches in **any language** work: the helper speaks UTF-8 end to end.
 
@@ -67,8 +67,7 @@ Sung\
 - **Library tools**: likes, listening history, smart mixes, custom smart playlists, M3U playlist import and export, custom playlist covers, playlist cleanup, multi-selection, drag reordering and Undo.
 - **Playback controls**: mini player, queue editing with source headings, an immersive up-next carousel, volume normalization, shuffle, repeat, sleep timer, playback speed and audio-device selection.
 - **Keyboard and assistive use**: every control takes focus and shows it, sections are marked as headings, and colors are solved to keep 4.5:1 contrast in both themes and at either contrast setting.
-- **Desktop integration**: media keys through MPRIS on Linux, optional notifications, light/dark themes and Noctalia palette support.
-- **SponsorBlock**, **Discord Rich Presence** and **Proxy** as described above — each one switched off until you turn it on in Settings.
+- **System tray**, **SponsorBlock**, **Discord Rich Presence** and **Proxy** as described above — each one switched off until you turn it on in Settings.
 
 Native rendering and bounded artwork caches keep Sung lightweight. Animations can be disabled in Settings.
 
@@ -86,7 +85,7 @@ On first run Sung offers a three-step setup: theme and accent color, a music fol
 
 **Lyrics.** Synchronized lyrics load for YouTube and server songs; import your own `.lrc`, adjust timing, or open the immersive view with poster-style lines.
 
-**Privacy.** YouTube browsing is anonymous; likes, playlists and history stay on your machine and never sync with a Google account. There is no analytics or telemetry. Optional lyric lookups send only the song's title, artist and duration and can be disabled. Library data can be exported and re-imported as JSON. On Windows everything lives under `%APPDATA%\Sung`; on Linux under the usual XDG directories.
+**Privacy.** YouTube browsing is anonymous; likes, playlists and history stay on your machine and never sync with a Google account. There is no analytics or telemetry. Optional lyric lookups send only the song's title, artist and duration and can be disabled. Library data can be exported and re-imported as JSON. Everything lives under `%APPDATA%\Sung`.
 
 ### Keyboard shortcuts
 
@@ -107,8 +106,6 @@ The full, day-to-day manual — artwork pipelines, volume normalization details,
 
 ## Build from source
 
-### Windows
-
 Requirements: **Qt 6.10 or newer** (MSVC 2022 64-bit kit with Core, Concurrent, Gui, Quick, Qml, QuickControls2, Multimedia, Network and Svg — the online installer's default "Qt 6.10 for desktop development" covers all of them; the QML bytecode step uses `DISCARD_QML_CONTENTS`, which older Qt releases lack), **Visual Studio 2022** with the C++ toolset (or just the Build Tools), and **CMake 3.24+** with **Ninja**. Python is not needed to build; pip/PyPI access is needed once to prepare the bundled helper runtime.
 
 From an *x64 Native Tools Command Prompt for VS 2022*:
@@ -126,24 +123,10 @@ copy helper\catalog.py helper\online_artwork.py helper\requirements.txt Sung\hel
 
 `build\sung.exe` embeds the QML, icons and the helper's Python scripts as Qt resources; it needs Qt's DLLs beside it, which `windeployqt` provides. To reproduce the fully self-contained zip that CI produces (embedded Python with `ytmusicapi` and `yt-dlp` preinstalled, ffmpeg beside the exe), read [`.github/workflows/windows.yml`](.github/workflows/windows.yml) — it is the authoritative recipe, step by step.
 
-### Linux
-
-Sung is a Linux player first. On CachyOS/Arch:
-
-```bash
-sudo pacman -S --needed git base-devel cmake ninja python nodejs ffmpeg qt6-base qt6-declarative qt6-multimedia qt6-svg qt6-wayland qt6-imageformats
-git clone https://github.com/yappologistic/Sung.git && cd Sung
-./scripts/install.sh
-```
-
-Installation is per-user in `~/.local`; do not run the install script with `sudo`. Other distributions need the equivalent Qt 6.8+ packages (Core, Gui, Quick, Qml, QuickControls2, Multimedia, Network, DBus, Svg, Wayland and the image formats), a C++20 compiler, CMake 3.24+, Ninja, Python 3, Node.js 20+ and FFmpeg.
-
-For development on either platform: `./scripts/setup.sh`, `./scripts/build.sh`, `./scripts/run.sh`; tests via `./scripts/test.sh`.
-
 ## Troubleshooting
 
 - **"YouTube helper could not start"** — the `runtime\` folder must sit next to `helper\` and `bin\`. If you moved files, keep the zip's structure.
-- **Playback problems** — playback depends on YouTube availability, region and network conditions. Sung buffers a whole song before playing it, so starting a track can take a moment.
+- **Playback problems** — playback depends on YouTube availability, region and network conditions. The next song is buffered while the current one plays, but a first start can still take a moment.
 - **YouTube playback breaks after an upstream change** — update the resolvers inside the package with the bundled interpreter:
 
   ```bat
@@ -157,8 +140,8 @@ For development on either platform: `./scripts/setup.sh`, `./scripts/build.sh`, 
 
 ## Credits and license
 
-- **[Sung](https://github.com/yappologistic/Sung)** and everything that makes it good — [**@yappologistic**](https://github.com/yappologistic). Support the project on [Buy Me a Coffee](https://buymeacoffee.com/e_gurl).
-- Windows packaging, SponsorBlock integration, Discord Rich Presence and the proxy option — the community build in this repository.
+- **[Sung](https://github.com/yappologistic/Sung)** — [**@yappologistic**](https://github.com/yappologistic), the original author of the player.
+- Windows packaging and the small additions described above — the community build in this repository.
 - [SponsorBlock](https://sponsor.ajay.app) community segment data; Discord via its local IPC; lyrics from [LRCLIB](https://lrclib.net); artwork matching via Apple Music's public pages and [MusicBrainz](https://musicbrainz.org).
 
 [MIT](LICENSE). Material Symbols are licensed under Apache-2.0; see [NOTICE](NOTICE) for third-party acknowledgments. Sung is an independent project and is not affiliated with Google, YouTube or Discord.

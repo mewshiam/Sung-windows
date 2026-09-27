@@ -97,19 +97,12 @@ private slots:
     b.save();{Backend copy;copy.setWatchMusicFolders(false);QCOMPARE(copy.sessions().size(),1);QVERIFY(copy.artworkFits(song));}
     b.clearQueue();QVERIFY(b.restoreSession(id));QTRY_VERIFY_WITH_TIMEOUT(b.playing()&&b.position()>=12000,5000);QVERIFY(b.position()<14000);QCOMPARE(b.playbackRate(),1.25);
     b.setMotion(false);QTRY_COMPARE_WITH_TIMEOUT(b.m_decodeRate,22050,5000);QVERIFY(!b.trackDetails(song).isEmpty());
-    b.m_settings.setValue("pauseOnDisconnect",true);b.m_outputDescription="Test headphones";
-    b.inspectOutputPorts({QVariantMap{{"description","Test headphones"},{"active_port","analog-output-headphones"}}});QVERIFY(b.playing());
-    b.inspectOutputPorts({QVariantMap{{"description","Test headphones"},{"active_port","analog-output-speaker"}}});QVERIFY(!b.playing());
+    b.m_settings.setValue("pauseOnDisconnect",true);
     b.play();QTRY_VERIFY(b.playing());b.m_outputId="removed-device";b.outputsChanged();QVERIFY(!b.playing());
     b.m_settings.setValue("pauseOnDisconnect",false);b.play();QTRY_VERIFY(b.playing());b.m_outputId="removed-device";b.outputsChanged();QVERIFY(b.playing());
     auto saved=b.m_sessions.first().toMap();auto unavailable=song;unavailable["available"]=false;
     saved["queue"]=QVariantList{song,unavailable,song};saved["index"]=2;b.m_sessions[0]=saved;
     QVERIFY(b.restoreSession(id));QCOMPARE(b.currentIndex(),1);QTRY_VERIFY(b.playing());
-    if(!QStandardPaths::findExecutable("pactl").isEmpty()){
-      b.setPauseOnDisconnect(true);b.setPauseOnDisconnect(false);b.setPauseOnDisconnect(true);
-      QTRY_COMPARE_WITH_TIMEOUT(b.m_portMonitor.state(),QProcess::Running,4000);
-      b.setPauseOnDisconnect(false);QTRY_COMPARE(b.m_portMonitor.state(),QProcess::NotRunning);
-    }
     b.pause();QVERIFY(b.saveSession("Updated",id));QCOMPARE(b.sessions().size(),1);QVERIFY(!b.restoreSession("missing"));b.deleteSession(id);QVERIFY(b.sessions().isEmpty());b.setCurrentArtworkFit(false);b.setMotion(true);b.clearQueue();b.save();
   }
   void libraryPolish() {

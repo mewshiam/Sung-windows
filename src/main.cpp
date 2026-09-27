@@ -2,7 +2,6 @@
 #include "rowselection.h"
 #include "desktoptheme.h"
 #include "freedmemory.h"
-#include "mpris.h"
 #include "roundedart.h"
 #include "motionbackdrop.h"
 #include "windowresources.h"
@@ -132,7 +131,7 @@ int main(int argc, char **argv) {
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.12.4");
+  app.setApplicationVersion("0.1.0");
   app.setDesktopFileName("sung");
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
@@ -212,11 +211,6 @@ int main(int argc, char **argv) {
   QObject::connect(&backend,&Backend::videoCoversChanged,&app,[]{RoundedArt::refreshFrames();});
   QObject::connect(backend.server(),&MusicServer::accountChanged,&app,[]{RoundedArt::clearCaches();});
   QObject::connect(&backend,&Backend::artworkCacheCleared,&app,[]{RoundedArt::clearCaches();});
-  bool exposeMpris = !args.contains("--isolated");
-#ifdef SUNG_DIAGNOSTICS
-  exposeMpris = exposeMpris || args.contains("--mpris-test");
-#endif
-  if (exposeMpris) registerMpris(&backend);
   engine.rootContext()->setContextProperty("windowResources", &windowResources);
   engine.addImageProvider("symbols", new Symbols);
   engine.rootContext()->setContextProperty("app", &backend);

@@ -79,7 +79,19 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   connect(this,&Backend::playbackChanged,this,&Backend::queueInfoChanged);
   connect(this,&Backend::settingsChanged,this,&Backend::queueInfoChanged);
   connect(&m_devices,&QMediaDevices::audioOutputsChanged,this,[this]{outputsChanged();});
-  applyAudioDevice();setupDisconnectMonitor();
+  applyAudioDevice();
+  // The tray icon answers with requests the player itself carries out. Its
+  // Open entry and a left click raise the window, which the single-instance
+  // pipe asks for too; its menu holds the transport, and quitting is the one
+  // way out when the window closes into the tray instead of ending Sung.
+  m_notifier.setTray(&m_tray);
+  connect(&m_tray,&SystemTray::activateRequested,this,&Backend::raiseRequested);
+  connect(&m_tray,&SystemTray::playPauseRequested,this,&Backend::toggle);
+  connect(&m_tray,&SystemTray::nextRequested,this,&Backend::next);
+  connect(&m_tray,&SystemTray::previousRequested,this,&Backend::previous);
+  connect(&m_tray,&SystemTray::quitRequested,this,[](){QCoreApplication::quit();});
+  connect(this,&Backend::playbackChanged,this,[this]{m_tray.setPlaying(playing());});
+  updateTray();
   eachDeck([this](QMediaPlayer *deck){
     connect(deck,&QMediaPlayer::metaDataChanged,this,[this,deck]{if(isActive(*deck))emit qualityChanged();});
     connect(deck,&QMediaPlayer::sourceChanged,this,[this,deck]{if(!isActive(*deck))return;m_decodeRate=0;m_decodeChannels=0;emit qualityChanged();});
@@ -226,7 +238,6 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   setupFolderWatching();
 }
 Backend::~Backend() {
-  m_portMonitor.kill();m_portProbe.kill();m_portMonitor.waitForFinished(500);m_portProbe.waitForFinished(500);
   m_notifier.clear();
   m_discord.clear();
   storeResumePosition();
@@ -1531,8 +1542,10 @@ void Backend::recordHistory() {
 void Backend::notifyTrack() {
   if(m_announcedToken==m_trackToken)return;
   m_announcedToken=m_trackToken;
+  const auto t=current();
+  m_tray.setTip(t.value("title").toString()+" — "+t.value("artist").toString());
   if(!trackNotifications()||m_historyPaused)return;
-  const auto t=current();m_notifier.show(t.value("title").toString(),t.value("artist").toString());
+  m_notifier.show(t.value("title").toString(),t.value("artist").toString());
 }
 void Backend::setHistoryPaused(bool paused) {
   if(m_historyPaused==paused)return;
@@ -1868,7 +1881,7 @@ void Backend::setAudioDeviceId(const QString &id) {
     if(!found)return;
   }
   if(audioDeviceId()==id)return;
-  m_settings.setValue("audioDevice",id);m_outputPort.clear();applyAudioDevice();if(pauseOnDisconnect())m_portDebounce.start();emit audioDevicesChanged();
+  m_settings.setValue("audioDevice",id);applyAudioDevice();emit audioDevicesChanged();
 }
 void Backend::applyAudioDevice() {
   auto chosen=QMediaDevices::defaultAudioOutput();bool found=audioDeviceId().isEmpty();
@@ -1876,7 +1889,7 @@ void Backend::applyAudioDevice() {
   // A disconnected device falls back immediately. It cannot steal playback if it reconnects.
   if(!found)m_settings.remove("audioDevice");
   if(activeAudio().device()!=chosen)activeAudio().setDevice(chosen);
-  m_outputId=chosen.id();m_outputDescription=chosen.description();
+  m_outputId=chosen.id();
 }
 void Backend::playCollection(int index) {
   if(index<0||index>=m_collection.count())return;

@@ -1,26 +1,20 @@
 #pragma once
 #include <QObject>
 #include <QVariantMap>
+#include "systemtray.h"
 
+// The transient now-playing hint. On Windows it rides the shared tray icon's
+// balloon, which Windows 10 and 11 render as a regular toast; the icon itself
+// is the Backend's SystemTray, which also answers the tray behaviours.
 class PlaybackNotifier : public QObject {
   Q_OBJECT
 public:
   explicit PlaybackNotifier(QObject *parent = nullptr);
+  void setTray(SystemTray *tray) { m_tray = tray; }
   void show(const QString &title, const QString &artist);
   void clear();
-private slots:
-  void notificationClosed(uint id, uint reason);
 private:
   void flush();
-  void close(uint id);
   QVariantMap m_queued;
-  uint m_id = 0;
-  quint64 m_generation = 0;
-  bool m_pending = false;
-#ifdef Q_OS_WIN
-  // The Windows toast host: a tray icon carrying balloon messages, defined
-  // in playbacknotifier.cpp. It keeps Qt Widgets out of a Qt Quick app.
-  struct TrayBalloon;
-  TrayBalloon *m_tray = nullptr;
-#endif
+  SystemTray *m_tray = nullptr;
 };

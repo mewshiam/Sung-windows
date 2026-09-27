@@ -479,6 +479,16 @@ public:
   Q_PROPERTY(bool discordPresence READ discordPresence WRITE setDiscordPresence NOTIFY settingsChanged)
   bool discordPresence() const {return m_settings.value("discordPresence",false).toBool();}
   void setDiscordPresence(bool enabled) {if(discordPresence()==enabled)return;m_settings.setValue("discordPresence",enabled);m_discord.setEnabled(enabled);if(enabled)updateDiscordPresence();emit settingsChanged();}
+  // Keeping Sung in the notification area. Minimizing hides the window into
+  // the tray icon, and so does closing it, which leaves the music playing;
+  // the icon's own menu is how the window comes back and how Sung quits.
+  Q_PROPERTY(bool trayMinimize READ trayMinimize WRITE setTrayMinimize NOTIFY settingsChanged)
+  bool trayMinimize() const {return m_settings.value("tray/minimize",false).toBool();}
+  void setTrayMinimize(bool enabled) {if(trayMinimize()==enabled)return;m_settings.setValue("tray/minimize",enabled);updateTray();emit settingsChanged();}
+  Q_PROPERTY(bool trayClose READ trayClose WRITE setTrayClose NOTIFY settingsChanged)
+  bool trayClose() const {return m_settings.value("tray/close",false).toBool();}
+  void setTrayClose(bool enabled) {if(trayClose()==enabled)return;m_settings.setValue("tray/close",enabled);updateTray();emit settingsChanged();}
+  void updateTray() {m_tray.setKept(trayMinimize() || trayClose());}
   bool typeAheadJump() const {return m_settings.value("typeAheadJump",true).toBool();}
   void setTypeAheadJump(bool enabled) {if(typeAheadJump()==enabled)return;m_settings.setValue("typeAheadJump",enabled);emit settingsChanged();}
   Q_INVOKABLE QString preparePlaylistCover(const QUrl &url);
@@ -734,15 +744,8 @@ private:
   void restorePlaybackPosition();
   void applyAudioDevice();
   void outputsChanged();
-  void setupDisconnectMonitor();
-  void refreshOutputPort();
-  void inspectOutputPorts(const QVariantList &sinks);
   void pauseForDisconnect();
   QByteArray m_outputId;
-  QString m_outputDescription,m_outputPort;
-  QProcess m_portMonitor,m_portProbe;
-  QTimer m_portDebounce,m_portTimeout;
-  bool m_portDirty=false;
   int m_decodeRate=0,m_decodeChannels=0;
   QVariantList m_sessions;
   void request(const QString &channel, QVariantMap args, Callback done, std::shared_ptr<QTemporaryDir> lifetime = {});
@@ -780,6 +783,7 @@ private:
   void restore(const QVariantMap &);
   static QVariantList playable(const QVariantList &);
   QSettings m_settings;
+  SystemTray m_tray;
   PlaybackNotifier m_notifier;
   bool m_historyPaused = false;
   quint64 m_skipHistoryToken = 0, m_announcedToken = 0;

@@ -222,11 +222,35 @@ ApplicationWindow {
     }
     // A panel width of nought means nobody has dragged it, so it follows the
     // canonical supporting pane proportion instead.
-    Settings { id: geometry; category: "Window"; property int width: 1180; property int height: 800; property real panelWidth: 0 }
+    Settings { id: geometry; category: "Window"; property int width: 1180; property int height: 800; property int x: -1; property int y: -1; property bool maximized: false; property real panelWidth: 0 }
     Settings { id: railSettings; category: "Navigation"; property bool expanded: false }
-    Component.onCompleted: { windowResources.manage(window);width=geometry.width;height=geometry.height;geometryReady=true;app.setUiActive(uiActive);if(!app.onboarded)Qt.callLater(()=>{if(!app.onboarded)onboarding.open();}); }
+    // The window comes back the size, spot and state it left, unless no
+    // screen holds that spot any more, or nobody left one to return to: a
+    // first run then opens centred on the work area.
+    function positionOnScreen(px,py) {
+        const screens=Qt.application.screens
+        for(let i=0;i<screens.length;i++){const s=screens[i]
+            if(px>=s.virtualX && px<s.virtualX+s.width && py>=s.virtualY && py<s.virtualY+s.height)return true}
+        return false
+    }
+    Component.onCompleted: { windowResources.manage(window);width=geometry.width;height=geometry.height;
+        if(geometry.x>=0 && geometry.y>=0 && positionOnScreen(geometry.x,geometry.y)){x=geometry.x;y=geometry.y}
+        else{x=Math.round((Screen.desktopAvailableWidth-width)/2);y=Math.round((Screen.desktopAvailableHeight-height)/2)}
+        if(geometry.maximized)visibility=Window.Maximized;
+        geometryReady=true;app.setUiActive(uiActive);if(!app.onboarded)Qt.callLater(()=>{if(!app.onboarded)onboarding.open();}); }
     onWidthChanged: {if(albumFlying)cancelAlbumFlight();if(geometryReady && !immersive && visibility===Window.Windowed)geometry.width=width;motionWindowSettle.restart();}
     onHeightChanged: {if(albumFlying)cancelAlbumFlight();if(geometryReady && !immersive && visibility===Window.Windowed)geometry.height=height;motionWindowSettle.restart();}
+    onXChanged: {if(geometryReady && !immersive && visibility===Window.Windowed)geometry.x=x}
+    onYChanged: {if(geometryReady && !immersive && visibility===Window.Windowed)geometry.y=y}
+    // Closing into the tray keeps the music going; the icon's menu is how
+    // Sung quits then. Minimizing into the tray hides the same way, so the
+    // taskbar keeps neither a button nor a preview of nothing.
+    onClosing: (close)=>{if(app.trayClose){close.accepted=false;window.hide()}}
+    onVisibilityChanged: (vis)=>{
+        if(vis===Window.Maximized)geometry.maximized=true
+        else if(vis===Window.Windowed){geometry.maximized=false;if(geometryReady && !immersive){geometry.x=x;geometry.y=y}}
+        else if(vis===Window.Minimized && app.trayMinimize)window.hide()
+    }
     property bool albumFlying: false
     property bool albumOpening: false
     property bool albumReturning:false
@@ -2501,7 +2525,7 @@ ApplicationWindow {
                 ColumnLayout {
                     id: settingsGroup3; objectName:"settingsGroup3"
                     Layout.fillWidth:true;Layout.minimumWidth:0; spacing:12
-                    property bool hasMatches: settingsDialog.matches("Music server library") || settingsDialog.matches("YouTube cookies import replace remove sign in") || settingsDialog.matches("YouTube streaming quality standard data saver bitrate") || settingsDialog.matches("Discord rich presence profile status share") || settingsDialog.matches("Proxy network address HTTP SOCKS port traffic")
+                    property bool hasMatches: settingsDialog.matches("Music server library") || settingsDialog.matches("YouTube cookies import replace remove sign in") || settingsDialog.matches("YouTube streaming quality standard data saver bitrate") || settingsDialog.matches("Discord rich presence profile status share") || settingsDialog.matches("Proxy network address HTTP SOCKS port traffic") || settingsDialog.matches("System tray minimize close notification area background playing")
                     visible: settingsDialog.searchQuery.trim() ? hasMatches : settingsDialog.category===4
                     SungText {objectName:"settingsConnectionsHeading";heading: true;visible:!!settingsDialog.searchQuery.trim();text:"Connections";font.pixelSize:Theme.titleLarge;emphasized: true;Layout.bottomMargin:8}
                     ColumnLayout {id:options3;objectName:"settingsRows3";Layout.fillWidth:true;Layout.minimumWidth:0;spacing:12
@@ -2524,6 +2548,9 @@ ApplicationWindow {
                 SungText {objectName:"networkGroupHeading"; visible: settingsDialog.matches("Proxy network address HTTP SOCKS port traffic"); text: "Network"; font.pixelSize: Theme.labelLarge; labelRole: true; color: Theme.muted; Layout.topMargin: 12 }
                 MTextField { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"proxyField"; visible: settingsDialog.matches("Proxy network address HTTP SOCKS port traffic"); label: "Proxy"; placeholderText: "http://127.0.0.1:8080 or socks5://host:1080"; text: app.proxyUrl; inputMethodHints: Qt.ImhUrlCharactersOnly; onEditingFinished: app.proxyUrl=text }
                 SungText { visible: settingsDialog.matches("Proxy network address HTTP SOCKS port traffic"); text: "Requests to YouTube, the lyric and artwork services, and SponsorBlock go through this proxy when one is set. HTTP and SOCKS5 both work; leave it empty to connect directly."; wrapMode: Text.Wrap; Layout.fillWidth: true;Layout.minimumWidth:0; color: Theme.muted; font.pixelSize: Theme.bodyMedium }
+                SungText {objectName:"trayGroupHeading"; visible: settingsDialog.matches("System tray minimize close notification area background playing"); text: "System tray"; font.pixelSize: Theme.labelLarge; labelRole: true; color: Theme.muted; Layout.topMargin: 12 }
+                MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"trayMinimizeSwitch"; visible: settingsDialog.matches("System tray minimize close notification area background playing"); text: "Minimize to the notification area"; hint: "Minimizing keeps Sung running from the notification area's icon instead of the taskbar. A click on the icon, or its menu's Open, brings the window back."; checked: app.trayMinimize; onToggled: app.trayMinimize=checked }
+                MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"trayCloseSwitch"; visible: settingsDialog.matches("System tray minimize close notification area background playing"); text: "Close to the notification area"; hint: "Closing the window keeps Sung playing from the notification area's icon, and the music goes on. The icon's menu, under Quit Sung, is how it ends for good."; checked: app.trayClose; onToggled: app.trayClose=checked }
                     }
                 }
                 ColumnLayout {
