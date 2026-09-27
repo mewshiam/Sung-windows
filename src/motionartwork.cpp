@@ -1,16 +1,33 @@
 #include "motionartwork.h"
+#include <QCoreApplication>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QImageReader>
 #include <QMediaPlayer>
 #include <QMovie>
+#include <QThreadPool>
 #include <QVideoFrame>
 #include <QVideoSink>
 #include <QTransform>
+#include <QtConcurrentRun>
 
 // An animation larger than the cap is decoded down to it; a smaller one is
 // left at its own size for the surface to scale, not enlarged up front.
 static QSize bounded(const QSize &native,int cap) {
   return native.width()>cap || native.height()>cap ? native.scaled(cap,cap,Qt::KeepAspectRatio) : native;
+}
+// Converting a video frame - QVideoFrame::toImage, the rotation and the
+// downscale of a 2732px tier - is tens of milliseconds of CPU work. On the
+// GUI thread it was a dropped frame each time; the work belongs beside the
+// cover decodes, off the thread that draws. One thread, in order: frames
+// come from one player, and a second would let two conversions race.
+static QThreadPool *convertPool() {
+  static QThreadPool *pool = nullptr;
+  if (!pool) {
+    pool = new QThreadPool(QCoreApplication::instance());
+    pool->setMaxThreadCount(1);
+  }
+  return pool;
 }
 MotionArtwork::MotionArtwork(QObject *parent):QObject(parent) {}
 MotionArtwork::~MotionArtwork() { clear(); }
@@ -24,10 +41,29 @@ void MotionArtwork::publish(QImage frame) {
 }
 void MotionArtwork::publishVideo(const QVideoFrame &frame) {
   if(!m_running || !frame.isValid())return;
-  auto image=frame.toImage();
-  if(frame.rotation()!=QtVideo::Rotation::None)image=image.transformed(QTransform().rotate(int(frame.rotation())));
-  if(frame.mirrored())image=image.transformed(QTransform().scale(-1,1));
-  publish(std::move(image));
+  // Back-pressure: if the last conversion is still running, this frame is
+  // dropped. A 30fps cover converting slower than that simply animates at
+  // the rate the machine manages; nothing queues, nothing waits, and the
+  // frame that lands is never older than the newest one offered.
+  bool expected=false;
+  if(!m_converting.compare_exchange_strong(expected,true))return;
+  const int maximumSize=m_maximumSize;
+  auto *watcher=new QFutureWatcher<QImage>(this);
+  connect(watcher,&QFutureWatcherBase::finished,this,[this,watcher]{
+    const QImage image=watcher->result();
+    watcher->deleteLater();
+    m_converting=false;
+    publish(image);
+  });
+  watcher->setFuture(QtConcurrent::run(convertPool(),[frame,maximumSize]()mutable{
+    QImage image=frame.toImage();
+    if(image.isNull())return QImage();
+    if(frame.rotation()!=QtVideo::Rotation::None)image=image.transformed(QTransform().rotate(int(frame.rotation())));
+    if(frame.mirrored())image=image.transformed(QTransform().scale(-1,1));
+    if(image.width()>maximumSize || image.height()>maximumSize)
+      image=image.scaled(maximumSize,maximumSize,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    return image;
+  }));
 }
 void MotionArtwork::setSource(const QUrl &source) {
   if(m_source==source)return;

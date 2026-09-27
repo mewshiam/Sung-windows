@@ -40,7 +40,14 @@ Item {
     Component.onCompleted: app.spectrumActive=listening
     Component.onDestruction: app.spectrumActive=false
 
-    readonly property int barCount: 72
+    // Seventy-two bars fill the ring's circumference at a spacing the eye
+    // reads as a continuous band on a 1x display. On a high-density one the
+    // same count costs the renderer more pixels per segment and buys nothing
+    // visible, so the count steps down: the shape CurveRenderer tesselates
+    // each frame is the most expensive thing this item does, and a fifth
+    // fewer segments is a fifth of that cost at the moment it matters most,
+    // while a song is playing.
+    readonly property int barCount: Window.window && Window.window.effectiveDevicePixelRatio >= 2 ? 56 : 72
     // MWavyProgress's 4dp stroke, the width Material gives its indicators'
     // active track, with round caps so a silent bar is a dot.
     readonly property real barWidth: 4
@@ -80,6 +87,12 @@ Item {
         }
         segments = lines
     }
+    // Path rebuilds are throttled to about 40Hz: the physics runs every
+    // frame the display gives it, but rebuilding the 72-segment path and
+    // re-tesselating it on the renderer was the item's own frame budget, and
+    // the difference between 40 and 60 redraws of a soft ring is beyond
+    // telling.
+    property real rebuildDebt: 0
     function step(seconds) {
         const dt = Math.min(0.05, seconds)
         const k = physics.stiffness, c = 2*physics.damping*Math.sqrt(k)
@@ -88,16 +101,17 @@ Item {
         for (let i = 0; i < barCount; ++i) {
             const target = listening ? (spectrum[bandFor(i)] || 0) : 0
             let x = heights[i] || 0, v = speeds[i] || 0
-            // Four substeps keep the stiff spring stable at a slow frame.
-            for (let n = 0; n < 4; ++n) {
+            // Two substeps keep the stiff spring stable at a slow frame.
+            for (let n = 0; n < 2; ++n) {
                 const a = -k*(x-target) - c*v
-                v += a*dt/4; x += v*dt/4
+                v += a*dt/2; x += v*dt/2
             }
             heights[i] = x; speeds[i] = v
             if (Math.abs(x-target) > 0.002 || Math.abs(v) > 0.02) moving = true
         }
         settling = moving
-        rebuild()
+        rebuildDebt += seconds
+        if (rebuildDebt >= 0.025 || (!listening && !moving)) { rebuildDebt = 0; rebuild() }
     }
     property bool settling: false
     onWidthChanged: rebuild()

@@ -35,6 +35,7 @@
 #include <QtMath>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QStandardPaths>
 #include <QSvgRenderer>
 #include <QTimer>
@@ -135,11 +136,21 @@ int main(int argc, char **argv) {
     qputenv("QSG_ATLAS_WIDTH", "1024");
   if (!qEnvironmentVariableIsSet("QSG_ATLAS_HEIGHT"))
     qputenv("QSG_ATLAS_HEIGHT", "1024");
+#ifdef Q_OS_WIN
+  // Qt picks the scene graph's RHI backend by driver heuristics, and a GPU it
+  // does not recognise falls back to opengl32sw, a software rasteriser that
+  // renders the whole interface on the CPU at a fraction of the frame rate -
+  // with no warning anywhere. Direct3D 11 is what every supported Windows
+  // version ships, so it is pinned here; an environment variable of one's own
+  // still wins, for testing the fallbacks on purpose.
+  if (!qEnvironmentVariableIsSet("QSG_RHI_BACKEND"))
+    qputenv("QSG_RHI_BACKEND", "d3d11");
+#endif
   QGuiApplication app(argc, argv);
   app.setApplicationName("sung");
   app.setApplicationDisplayName("Sung");
   app.setOrganizationName("Sung");
-  app.setApplicationVersion("0.1.3");
+  app.setApplicationVersion("0.1.4");
   app.setDesktopFileName("sung");
 #ifdef Q_OS_WIN
   // The helper shells out to ffprobe, and yt-dlp looks for ffmpeg the same
@@ -231,6 +242,43 @@ int main(int argc, char **argv) {
   if (engine.rootObjects().isEmpty())
     return 1;
   auto window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+  // Which renderer actually came up. The pin above makes Direct3D 11 the
+  // answer almost always, but a driver fallback, a forced environment
+  // variable or a platform without it can quietly pick another; a software
+  // backend explains a slow interface faster than any profiling would.
+  {
+    const auto api = window->rendererInterface()->graphicsApi();
+    const char *name = "unknown";
+    switch (api) {
+      case QSGRendererInterface::Software: name = "software"; break;
+      case QSGRendererInterface::OpenVG: name = "openvg"; break;
+      case QSGRendererInterface::OpenGL: name = "opengl"; break;
+      case QSGRendererInterface::Direct3D11: name = "d3d11"; break;
+      case QSGRendererInterface::Direct3D12: name = "d3d12"; break;
+      case QSGRendererInterface::Vulkan: name = "vulkan"; break;
+      case QSGRendererInterface::Metal: name = "metal"; break;
+      default: break;
+    }
+    fprintf(stdout, "RHI_BACKEND %s\n", name);fflush(stdout);
+  }
+  // SUNG_FPS=1 puts a live frame-rate counter in the corner. It counts the
+  // same frameSwapped signal the idle probe does, delivered once a second to
+  // the interface, so a before/after comparison needs nothing but the flag.
+  if (qEnvironmentVariableIsSet("SUNG_FPS")) {
+    auto *frames = new int(0);
+    window->setProperty("fpsVisible", true);
+    window->setProperty("fps", 0);
+    QObject::connect(window, &QQuickWindow::frameSwapped, window, [window, frames] {
+      ++*frames;
+    });
+    auto *ticker = new QTimer(window);
+    ticker->setInterval(1000);
+    QObject::connect(ticker, &QTimer::timeout, window, [window, frames] {
+      window->setProperty("fps", *frames);
+      *frames = 0;
+    });
+    ticker->start();
+  }
   // The taskbar button shows the window's own icon, and a QML window never
   // takes one from QGuiApplication::setWindowIcon - on Windows the platform
   // integration drops that call outright, which is why the running window

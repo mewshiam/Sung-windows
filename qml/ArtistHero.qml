@@ -29,6 +29,8 @@ Item {
         objectName: "artistHeroBackdrop"
         anchors.fill: parent
         url: app.cover || ""
+        // Performance mode keeps the window's own wash; the panes sit flat.
+        allowed: !app.performanceMode
         // The band sits on the surface it belongs to, so the cover only ever
         // tints it. Material keeps hero imagery behind text, never competing.
         scrim: Theme.surfaceLow
@@ -79,8 +81,12 @@ Item {
                 // Display small while the band is open, title large once it has
                 // collapsed into an ordinary header row.
                 font.pixelSize: Theme.displaySmall-(Theme.displaySmall-Theme.titleLarge)*hero.collapse
-                // DefaultSpatial changes the visible size as the hero collapses.
-                Behavior on font.pixelSize { id: typeSizeBehavior; enabled: app.motion; NumberAnimation { objectName: "artistHeroTypeMotion"; duration: Theme.springSpatialMs; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } }
+                // DefaultSpatial changes the visible size as the hero collapses,
+                // but the collapse follows the list's own scroll: with the spring
+                // live, every frame the list moved re-targeted it and re-shaped
+                // the glyphs. Held while the list is in hand, as the hero's own
+                // height is next door.
+                Behavior on font.pixelSize { id: typeSizeBehavior; enabled: app.motion && !tracks.moving; NumberAnimation { objectName: "artistHeroTypeMotion"; duration: Theme.springSpatialMs; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } }
                 emphasized: true
                 wrapMode: Text.Wrap
                 maximumLineCount: 2

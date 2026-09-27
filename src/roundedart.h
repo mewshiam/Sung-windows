@@ -104,6 +104,12 @@ public:
   Q_INVOKABLE qreal minimumScrim(const QColor &surface, const QColor &ink,
                                  qreal base, qreal target) const;
   static void clearCaches();
+  // Everything decode-related held in RAM - the decoded covers, the requests
+  // still in flight and the scrims' inputs are safe to drop when the window
+  // will not be seen for a while. Unlike clearCaches, the on-disk artwork
+  // cache stays: refilling it costs the network, and minimizing is not the
+  // moment to re-download a library's covers.
+  static void trimMemory();
   static std::function<QNetworkRequest(const QUrl &)> resolveServerArt;
   // What to draw for one of YouTube's video frames: the album cover the
   // backend has matched to it, or an empty URL to draw the frame itself.

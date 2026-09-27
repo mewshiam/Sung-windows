@@ -178,6 +178,11 @@ class Backend : public QObject {
   Q_PROPERTY(bool precisePointer READ precisePointer WRITE setPrecisePointer NOTIFY settingsChanged)
   Q_PROPERTY(bool ambientBackdrop READ ambientBackdrop WRITE setAmbientBackdrop NOTIFY settingsChanged)
   Q_PROPERTY(bool backdropPulse READ backdropPulse WRITE setBackdropPulse NOTIFY settingsChanged)
+  // One switch for a machine that cannot afford the expressive defaults: flat
+  // surfaces with only the window's wash, no Motion layout or visualizer ring,
+  // no animated covers decoding in the background. Everything it turns off is
+  // decoration; playback, lyrics and browsing are untouched.
+  Q_PROPERTY(bool performanceMode READ performanceMode WRITE setPerformanceMode NOTIFY settingsChanged)
   Q_PROPERTY(bool typeAheadJump READ typeAheadJump WRITE setTypeAheadJump NOTIFY settingsChanged)
   Q_PROPERTY(bool onboarded READ onboarded WRITE setOnboarded NOTIFY settingsChanged)
   Q_PROPERTY(QVariantMap albumInfo READ albumInfo NOTIFY catalogChanged)
@@ -472,6 +477,8 @@ public:
   void setOnboarded(bool done) {if(onboarded()==done)return;m_settings.setValue("onboarded",done);emit settingsChanged();}
   bool backdropPulse() const {return m_settings.value("backdropPulse",true).toBool();}
   void setBackdropPulse(bool enabled) {if(backdropPulse()==enabled)return;m_settings.setValue("backdropPulse",enabled);emit settingsChanged();}
+  bool performanceMode() const {return m_settings.value("performanceMode",false).toBool();}
+  void setPerformanceMode(bool enabled) {if(performanceMode()==enabled)return;m_settings.setValue("performanceMode",enabled);emit settingsChanged();}
   // Outbound traffic honours this proxy when one is set: the helper's requests
   // (YouTube Music, yt-dlp, lyric and artwork lookups) and the SponsorBlock
   // lookup alike. Empty means connect directly.
@@ -811,6 +818,7 @@ private:
   void beginView(const QString &key);
   void browseRequest(QVariantMap req, bool push = true);
   void load();
+  void applyLibrary(const QVariantMap &d);
   void recordHistory();
   void notifyTrack();
   void resolveCurrent(bool retry = false);
@@ -955,6 +963,8 @@ private:
   // up every frame for that long each time a song changed. One thread, so the
   // writes land in the order they were asked for.
   QThreadPool m_saver;
+  // Reading the saved library: parse on a worker, apply on the GUI thread.
+  QThreadPool m_loader;
   QVariantMap libraryDocument() const;
   void saveInBackground();
   double m_userVolume=0.65, m_sleepGain=1.0, m_normalizationGain=1.0, m_normalizationDb=0.0, m_trim=0.0;

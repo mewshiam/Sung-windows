@@ -42,8 +42,8 @@ ApplicationWindow {
     property var miniPlayer: null
     readonly property bool uiActive: (visible && visibility!==Window.Minimized) || (miniPlayer!==null && miniPlayer.visible && miniPlayer.visibility!==Window.Minimized)
     onUiActiveChanged: {app.setUiActive(uiActive);if(!uiActive){cancelCoverFlight();cancelAlbumFlight();}}
-    Binding { target: motionArtwork; property: "source"; value: window.uiActive && app.motion && app.animatedArtwork ? (app.currentMotionArt || "") : "" }
-    Binding { target: motionArtwork; property: "running"; value: window.uiActive && app.playing && app.motion && app.animatedArtwork }
+    Binding { target: motionArtwork; property: "source"; value: window.uiActive && app.motion && app.animatedArtwork && !app.performanceMode ? (app.currentMotionArt || "") : "" }
+    Binding { target: motionArtwork; property: "running"; value: window.uiActive && app.playing && app.motion && app.animatedArtwork && !app.performanceMode }
     // The Motion layout fills the window with the cover, so only there is it
     // fetched and decoded large; every other surface shares the small one.
     readonly property bool motionLayoutShown: immersive && !!immersiveLoader.item && immersiveLoader.item.motionLayout
@@ -63,11 +63,14 @@ ApplicationWindow {
     readonly property var motionHeights: motionTall ? [1438, 2216, 2732] : [1080, 1920, 2160]
     // Auto takes the smallest that fills the window without enlarging it:
     // a cover filling the window needs the window's width, or the width its
-    // height asks of the cover's shape, whichever is more.
+    // height asks of the cover's shape, whichever is more. Auto stops at the
+    // 1920 tier: above it, every frame of the animation is a frame of
+    // decode, and the sharpness a 4K cover adds behind a moving picture is
+    // beyond seeing. 2160 stays for the explicit choice.
     readonly property int motionAutoTier: {
         const need = Math.max(motionWindow.width, motionWindow.height*(motionTall ? 3/4 : 1))*Screen.devicePixelRatio
         const at = motionWidths.findIndex(w => w >= need)
-        return motionTiers[at >= 0 ? at : motionTiers.length-1]
+        return Math.min(motionTiers[at >= 0 ? at : motionTiers.length-1], 1920)
     }
     readonly property int motionTier: app.motionQuality > 0 ? app.motionQuality : motionAutoTier
     Binding { target: motionArtwork; property: "maximumSize"; value: window.motionLayoutShown ? window.motionHeights[window.motionTiers.indexOf(window.motionTier)] : 800 }
@@ -83,6 +86,11 @@ ApplicationWindow {
     }
     property bool compactMode: false
     property bool immersive: false
+    // SUNG_FPS=1 drives these from main(): a frame counter delivered once a
+    // second, shown in the corner. Declared here so the C++ setProperty
+    // writes land on real properties with notifications.
+    property bool fpsVisible: false
+    property int fps: 0
     property bool wasMaximized: false
     property bool geometryReady: false
     property var homeSections: {app.sections;app.pins;app.homeOrder;app.hiddenHomeSections;return app.homeSections();}
@@ -637,7 +645,11 @@ ApplicationWindow {
         }
     }
     Shortcut { sequence: "F11"; enabled: !window.modalOpen; onActivated: window.toggleImmersive() }
-    Loader { id: immersiveLoader; anchors.fill: parent; active: window.immersive; sourceComponent: Component { ImmersivePlayer { coverHidden: window.coverFlying;
+    // Built while the immersive transition plays: the player is a large tree,
+    // and assembling it synchronously froze the first frames of the very
+    // animation that was meant to smooth the change. The guards on
+    // immersiveLoader.item throughout already tolerate a slow arrival.
+    Loader { id: immersiveLoader; anchors.fill: parent; asynchronous: true; active: window.immersive; sourceComponent: Component { ImmersivePlayer { coverHidden: window.coverFlying;
                 preferredLayout:listeningSettings.layout;autoHideControls:listeningSettings.autoHide;externalModalOpen:window.modalOpen
                 coverflow:listeningSettings.coverflow
                 motionLyrics:listeningSettings.motionLyrics
@@ -683,6 +695,21 @@ ApplicationWindow {
             MWavyProgress {progress:app.downloading && app.downloadProgress>0?app.downloadProgress:-1;Layout.preferredWidth:96}
             MButton {objectName:"cancelDownloadsButton";symbol:"close";tip:"Cancel downloads";onClicked:app.cancelDownloads()}
         }
+    }
+    // Live frames-per-second, when started with SUNG_FPS=1: the same
+    // frameSwapped count the idle probe uses, delivered once a second, so a
+    // before/after on a given machine needs nothing but the flag. Invisible
+    // in every normal run.
+    Text {
+        objectName: "fpsOverlay"
+        visible: window.fpsVisible
+        text: window.fps + " fps"
+        x: parent.width-width-12; y: parent.height-height-10
+        z: 9999
+        color: window.fps>=55 ? "#7ddb8a" : window.fps>=30 ? "#e8c46a" : "#e88a6a"
+        font.pixelSize: 12; font.family: "Consolas"
+        style: Text.Outline; styleColor: "#000000"
+        Accessible.ignored: true
     }
     Drawer {
         id:immersiveQueue;objectName:"immersiveQueueSheet";edge:Qt.RightEdge
@@ -867,7 +894,7 @@ ApplicationWindow {
                             id: listPaneGrid
                             objectName: "listPaneGrid"
                             Layout.fillWidth: true; Layout.fillHeight: true
-                            clip: true; reuseItems: true; cacheBuffer: 0
+                            clip: true; reuseItems: true; cacheBuffer: 560
                             model: app.listPane
                             cellWidth: width/Math.max(1,Math.floor(width/140))
                             cellHeight: cellWidth+52
@@ -937,6 +964,11 @@ ApplicationWindow {
                     }
                     AmbientBackdrop {
                         objectName: "homeBackdrop"; anchors.fill: parent
+                        // Performance mode keeps the window's own wash and lets the
+                        // panes sit flat: each of these is a decode, a blur and a
+                        // texture of its own, and on a weak GPU the washes are the
+                        // first thing to go.
+                        allowed: !app.performanceMode
                         // The window wash already carries this cover; repeating
                         // it inside the panel would only double the scrim.
                         url: app.page==="home" && !window.windowWashed ? window.homeArtwork : ""
@@ -1017,8 +1049,14 @@ ApplicationWindow {
                                     Layout.minimumWidth: 0; Layout.maximumWidth: 720
                                     Layout.preferredHeight: visible ? 56 : 0
                                 }
-                            SungText {heading: true; visible: !pageSearchHost.visible && !(app.page==="server" && !app.collectionItem.id); text: app.title; objectName: "collectionHeaderTitle"; emphasized: true; scaled: true; font.pixelSize: app.page==="home"?Theme.displaySmall:Theme.headlineMedium-(Theme.headlineMedium-Theme.titleLarge)*content.headerCollapse; // PaneMotion.kt:155-177 uses DefaultSpatial for changing bounds.
-                                Behavior on font.pixelSize { id:collectionTitleSizeBehavior; NumberAnimation { objectName:"collectionTitleSizeMotion"; duration: app.motion?Theme.springSpatialMs:0; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } } Layout.fillWidth: true; wrapMode: Text.Wrap; maximumLineCount: 2 }
+                            SungText {heading: true; visible: !pageSearchHost.visible && !(app.page==="server" && !app.collectionItem.id); text: app.title; objectName: "collectionHeaderTitle"; emphasized: true; scaled: true; font.pixelSize: app.page==="home"?Theme.displaySmall:Theme.headlineMedium-(Theme.headlineMedium-Theme.titleLarge)*content.headerCollapse; // The size follows the list's own scroll, and a Behavior on it
+                                // re-issued a glyph re-layout every frame the list moved -
+                                // retargeting the spring, re-shaping the line, twice over -
+                                // while the collapse it was smoothing was itself moving
+                                // anyway. Held while the list is in hand, as headerExtent
+                                // is; the spring keeps the transitions that happen when
+                                // the list is still.
+                                Behavior on font.pixelSize { id:collectionTitleSizeBehavior; enabled: app.motion && !tracks.moving; NumberAnimation { objectName:"collectionTitleSizeMotion"; duration: app.motion?Theme.springSpatialMs:0; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } } Layout.fillWidth: true; wrapMode: Text.Wrap; maximumLineCount: 2 }
                                 SungText { objectName: "albumArtist"; visible: !!app.albumInfo.artist;opacity:1-content.headerCollapse;Layout.maximumHeight:implicitHeight*(1-content.headerCollapse);clip:true; Layout.fillWidth: true; text: app.albumInfo.artist || ""; font.pixelSize: Theme.bodyLarge; color: Theme.muted; maximumLineCount: 2; wrapMode: Text.Wrap }
                                 SungText { objectName: "albumSummary"; visible: !!app.albumInfo.summary || app.page==="local";opacity:1-content.headerCollapse;Layout.maximumHeight:implicitHeight*(1-content.headerCollapse);clip:true; Layout.fillWidth: true
                                     text: {
@@ -1308,7 +1346,7 @@ ApplicationWindow {
                             ListView {
                                 id: shelves; objectName: "homeShelves"; anchors.fill: parent
                                 visible: window.homeSections.length>0 && !(window.destination==="library"&&window.libraryTab==="playlists")
-                                clip: true; spacing: window.paneGutter+2; reuseItems: true; cacheBuffer: 0
+                                clip: true; spacing: window.paneGutter+2; reuseItems: true; cacheBuffer: 560
                                 model: window.homeSections; boundsBehavior: Flickable.StopAtBounds
                                 ScrollBar.vertical: MScrollBar {}
                                 MSmoothWheel { flick: shelves }
@@ -1342,7 +1380,7 @@ ApplicationWindow {
                                 }
                             }
                             GridView {
-                                id: localGroups; objectName: "localGroups"; anchors.fill: parent; clip: true; reuseItems: true; cacheBuffer: 0
+                                id: localGroups; objectName: "localGroups"; anchors.fill: parent; clip: true; reuseItems: true; cacheBuffer: 560
                                 bottomMargin: libraryFab.visible ? libraryFab.height+24 : 0
                                 visible: app.page==="library" && app.viewMode==="grid" && (app.libraryId==="local-albums" || app.libraryId==="local-artists")
                                 model: visible ? app.collection : null
@@ -1396,7 +1434,7 @@ ApplicationWindow {
                                 }
                             }
                             GridView {
-                                id:playlistGrid;objectName:"playlistGrid";anchors.fill:parent;clip:true;reuseItems:true;cacheBuffer:0
+                                id:playlistGrid;objectName:"playlistGrid";anchors.fill:parent;clip:true;reuseItems:true;cacheBuffer:560
                                 bottomMargin: libraryFab.visible ? libraryFab.height+24 : 0
                                 visible:window.destination==="library"&&window.libraryTab==="playlists"&&!window.localPlaylist&&app.viewMode==="grid"
                                 model:visible?app.playlists:[];cellWidth:width/Math.max(2,Math.floor(width/Theme.gridCell));
@@ -1497,6 +1535,7 @@ ApplicationWindow {
                     Behavior on revealWidth { id:sideRevealBehavior; enabled: !gripMouse.pressed; NumberAnimation { objectName:"sideRevealMotion"; duration: app.motion?Theme.springSpatialMs:0; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springSpatial } }
                     AmbientBackdrop {
                         objectName: "nowBackdrop"; anchors.fill: parent
+                        allowed: !app.performanceMode
                         url: window.side==="now" ? (app.current.art || "") : ""
                         scrim: Theme.surfaceLow; dim: 0.86; corner: parent.radius
                     }
@@ -2399,7 +2438,7 @@ ApplicationWindow {
                     Layout.fillWidth:true;Layout.minimumWidth:0; spacing:12
                     // Every control term below must also appear here, or its
                     // parent disappears before Settings can show the match.
-                    property bool hasMatches: settingsDialog.matches("Navigation top bar sidebar rail destinations") || settingsDialog.matches("Appearance theme system Noctalia light dark") || settingsDialog.matches("Appearance artwork accent color") || settingsDialog.matches("Accent color source palette") || settingsDialog.matches("Ambient artwork backdrop immersive now playing") || settingsDialog.matches("Backdrop follows the music audio") || settingsDialog.matches("Album covers for music videos YouTube Apple Music") || settingsDialog.matches("Color scheme variant neutral tonal spot vibrant expressive content") || settingsDialog.matches("Contrast standard medium high accessibility") || settingsDialog.matches("Density compact comfortable spacing") || settingsDialog.matches("Pointer density precise mouse touch target") || settingsDialog.matches("Current view layout density grid list") || (!!app.current.id && settingsDialog.matches("Current artwork")) || settingsDialog.matches("Animated album artwork") || settingsDialog.matches("Online animated covers YouTube Apple Music") || settingsDialog.matches("Motion layout video quality auto 1080p 2K 4K animated cover") || settingsDialog.matches("Animations") || settingsDialog.matches("Poster-style lyrics Google Sans Flex stretch font current line")
+                    property bool hasMatches: settingsDialog.matches("Navigation top bar sidebar rail destinations") || settingsDialog.matches("Appearance theme system Noctalia light dark") || settingsDialog.matches("Appearance artwork accent color") || settingsDialog.matches("Accent color source palette") || settingsDialog.matches("Performance mode low end integrated gpu washes panes motion visualizer animated") || settingsDialog.matches("Ambient artwork backdrop immersive now playing") || settingsDialog.matches("Backdrop follows the music audio") || settingsDialog.matches("Album covers for music videos YouTube Apple Music") || settingsDialog.matches("Color scheme variant neutral tonal spot vibrant expressive content") || settingsDialog.matches("Contrast standard medium high accessibility") || settingsDialog.matches("Density compact comfortable spacing") || settingsDialog.matches("Pointer density precise mouse touch target") || settingsDialog.matches("Current view layout density grid list") || (!!app.current.id && settingsDialog.matches("Current artwork")) || settingsDialog.matches("Animated album artwork") || settingsDialog.matches("Online animated covers YouTube Apple Music") || settingsDialog.matches("Motion layout video quality auto 1080p 2K 4K animated cover") || settingsDialog.matches("Animations") || settingsDialog.matches("Poster-style lyrics Google Sans Flex stretch font current line")
                     visible: settingsDialog.searchQuery.trim() ? hasMatches : settingsDialog.category===0
                     SungText {objectName:"settingsAppearanceHeading";heading: true;visible:!!settingsDialog.searchQuery.trim();text:"Appearance";font.pixelSize:Theme.titleLarge;emphasized: true;Layout.bottomMargin:8}
                     ColumnLayout {id:options0;objectName:"settingsRows0";Layout.fillWidth:true;Layout.minimumWidth:0;spacing:12
@@ -2417,7 +2456,8 @@ ApplicationWindow {
                 // over a control; Accent color has the same job.
                 SungText {objectName:"accentColorHeading";text:"Accent color";visible:settingsDialog.matches("Accent color source palette");font.pixelSize:Theme.titleMedium;typeRole:"titleMedium";Layout.topMargin:4}
                 AccentPicker {Layout.fillWidth:true;Layout.minimumWidth:0;visible:settingsDialog.matches("Accent color source palette")}
-                MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"ambientBackdropSwitch"; text:"Ambient artwork backdrop"; checked:app.ambientBackdrop; onToggled:app.ambientBackdrop=checked; visible:settingsDialog.matches("Ambient artwork backdrop immersive now playing") }
+                MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"performanceModeSwitch"; text:"Performance mode"; hint:"Flat surfaces, no washes in the panes, no Motion layout or visualizer, no animated covers - for integrated GPUs and low-end machines. Playback, lyrics and browsing are unchanged."; checked:app.performanceMode; onToggled:app.performanceMode=checked; visible:settingsDialog.matches("Performance mode low end integrated gpu washes panes motion visualizer animated") }
+                MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"ambientBackdropSwitch"; text:"Ambient artwork backdrop"; checked:app.ambientBackdrop; enabled:!app.performanceMode; onToggled:app.ambientBackdrop=checked; visible:settingsDialog.matches("Ambient artwork backdrop immersive now playing") }
                 MSwitch { Layout.fillWidth:true;Layout.minimumWidth:0; objectName:"backdropPulseSwitch"; text:"Backdrop follows the music"; checked:app.backdropPulse; enabled:app.ambientBackdrop; onToggled:app.backdropPulse=checked; visible:settingsDialog.matches("Backdrop follows the music audio") }
                 // Material spreads the same five palettes differently for each of
                 // its scheme variants, which is what decides how much of the

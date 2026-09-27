@@ -235,40 +235,70 @@ void RoundedArt::reload(bool preserve) {
             if (got > 4 * 1024 * 1024 || total > 4 * 1024 * 1024)
               r->abort();
           });
+  // The download ends here, on the GUI thread, but the decode does not
+  // happen on it: a full-size JPEG or WebP taken apart and scaled on the
+  // thread that draws was worth a dropped frame per cover that scrolled
+  // into view. The bytes go to the same pool the local covers use, and the
+  // finished picture comes back with the same generation-token pattern:
+  // only the newest request for this surface may deliver, and a delegate
+  // that has moved on, or a surface being destroyed, leaves its decode
+  // with a stale token.
   connect(r, &QNetworkReply::finished, this, [this, r, key, resized=(url!=m_source && !server)] {
     if (m_reply != r) {
       r->deleteLater();
       return;
     }
     m_reply = nullptr;
+    const bool failed = r->error() != QNetworkReply::NoError;
+    auto bytes = failed ? QByteArray() : r->readAll();
+    r->deleteLater();
     // Concurrent views can finish the same artwork request together. Reuse
     // the first decoded image instead of retaining a private copy per view.
     if (const auto image = cache.object(key)) {
       m_image = *image;
-    } else if (r->error() == QNetworkReply::NoError) {
-      auto bytes = r->readAll();
+      imageReady();
+      return;
+    }
+    if (failed || bytes.isEmpty()) {
+      if (resized && !m_originalSizeFallback) { m_originalSizeFallback = true; reload(); return; }
+      imageReady();
+      return;
+    }
+    const int pixels = m_pixels;
+    const quint64 token = ++m_decode;
+    auto *watcher = new QFutureWatcher<QImage>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, token, key, pixels, resized] {
+      const QImage image = watcher->result();
+      watcher->deleteLater();
+      if (token != m_decode) return;
+      if (!image.isNull()) {
+        m_image = image;
+        cache.insert(key, new QImage(image), image.sizeInBytes());
+        imageReady();
+        return;
+      }
+      // An image the decoder could not take apart at the asked size falls
+      // back to the source untouched, which is also how a missing HD frame
+      // degrades.
+      if (resized && !m_originalSizeFallback) { m_originalSizeFallback = true; reload(); return; }
+      imageReady();
+    });
+    watcher->setFuture(QtConcurrent::run(decodePool(), [bytes, pixels]() mutable {
       QBuffer buffer(&bytes);
       buffer.open(QIODevice::ReadOnly);
       QImageReader reader(&buffer);
       reader.setAutoTransform(true);
       auto size = reader.size();
-      if (size.isValid() && size.width() <= 10000 && size.height() <= 10000) {
-        reader.setScaledSize(
-            size.scaled(m_pixels, m_pixels, Qt::KeepAspectRatio));
-        m_image = reader.read();
-        // Opaque covers need three color bytes, not an unused alpha byte.
-        // Preserve images with alpha and higher precision in their source format.
-        if (m_image.format() == QImage::Format_RGB32) {
-          auto packed = std::move(m_image).convertToFormat(QImage::Format_RGB888);
-          if (!packed.isNull()) m_image = std::move(packed);
-        }
-        if (!m_image.isNull())
-          cache.insert(key, new QImage(m_image), m_image.sizeInBytes());
-      }
-    }
-    r->deleteLater();
-    if(m_image.isNull() && resized && !m_originalSizeFallback){m_originalSizeFallback=true;reload();return;}
-    imageReady();
+      if (!size.isValid() || size.width() > 10000 || size.height() > 10000)
+        return QImage();
+      reader.setScaledSize(size.scaled(pixels, pixels, Qt::KeepAspectRatio));
+      QImage image = reader.read();
+      // Opaque covers need three color bytes, not an unused alpha byte.
+      // Preserve images with alpha and higher precision in their source format.
+      if (image.format() == QImage::Format_RGB32)
+        image = std::move(image).convertToFormat(QImage::Format_RGB888);
+      return image;
+    }));
   });
 }
 // A painted surface keeps a render target the size of the item, and the scene
@@ -360,6 +390,13 @@ void RoundedArt::clearCaches() {
   cache.clear();localLoads.clear();
   // Clearing local data must not start the network stack as a side effect.
   if(artNetwork && artNetwork->cache())artNetwork->cache()->clear();
+}
+void RoundedArt::trimMemory() {
+  // The decoded covers and their in-flight loads are RAM only; every surface
+  // re-decodes from the disk cache on show, which is why the disk cache is
+  // kept here. Live surfaces keep their own current picture: they painted
+  // from it before and will until their source changes.
+  cache.clear();localLoads.clear();
 }
 void RoundedArt::refreshFrames() {
   for(auto *art:std::as_const(liveArt()))if(!artworkurl::videoId(art->m_source).isEmpty())art->refresh();

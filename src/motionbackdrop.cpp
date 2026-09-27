@@ -17,10 +17,13 @@ constexpr qreal featherShare = 0.16;
 // The blur's standard deviation in view pixels. Three box passes of radius r
 // spread as a Gaussian with sigma sqrt(r(r+1)) samples.
 constexpr qreal blurSigma = 48;
-// The frame moves on every video frame; the edge follows every other one.
-// At a 30fps cover that is 15 blurs a second, and the edge is too soft for
-// the lag to show where it crosses into the sharp frame.
-constexpr int edgeEvery = 2;
+// The frame moves on every video frame; the edge follows every fourth one.
+// At a 30fps cover that is under 8 blurs a second, and the edge is too soft
+// for the lag to show where it crosses into the sharp frame. The blur is the
+// most expensive CPU work in the backdrop - a shrunk, blurred, feathered
+// picture rebuilt at the window's aspect - so cutting its rate is what
+// frees the frames the ring and the covers need.
+constexpr int edgeEvery = 4;
 
 // The part of `frame` a cover fill of `view` shows, in the frame's pixels.
 QRect visiblePart(const QSize &frame, const QSizeF &view) {

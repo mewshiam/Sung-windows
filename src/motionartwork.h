@@ -2,12 +2,14 @@
 #include <QImage>
 #include <QObject>
 #include <QUrl>
+#include <atomic>
 #include <memory>
 
 class QMovie;
 class QMediaPlayer;
 class QVideoSink;
 class QVideoFrame;
+class QThreadPool;
 
 // One decoder for the current cover, shared by all now-playing surfaces.
 class MotionArtwork : public QObject {
@@ -44,7 +46,12 @@ private:
   bool m_running=false;
   int m_maximumSize=800;
   bool m_movieFailed=false;
+  // One conversion is ever in flight; a frame that arrives before the last
+  // one is done is dropped rather than queued, so a slow decode lowers the
+  // animation's frame rate instead of the interface's, and the frames that
+  // do land are always the newest ordering.
+  std::atomic_bool m_converting{false};
   std::unique_ptr<QMovie> m_movie;
-  std::unique_ptr<QVideoSink> m_sink;
   std::unique_ptr<QMediaPlayer> m_player;
+  std::unique_ptr<QVideoSink> m_sink;
 };

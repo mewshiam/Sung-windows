@@ -96,7 +96,14 @@ Slider {
         Item {
             id: played; objectName: "playedWave"
             visible: !s.volumeMode
-            width: Math.max(0,s.thumbCenter-s.thumbWidth/2-s.trackGap); height: track.height; clip: true; layer.enabled: true; layer.smooth: true
+            // The layer's buffer is sized to this item, so a width that moved
+            // with every position tick was reallocating it several times a
+            // second for the whole playback. Eight pixels is a third of the
+            // wave's own wavelength: the cut point walks that far before the
+            // buffer follows, and the reallocation stops being a thing the
+            // steady state ever does.
+            readonly property real targetWidth: Math.max(0,s.thumbCenter-s.thumbWidth/2-s.trackGap)
+            width: Math.round(targetWidth/8)*8; height: track.height; clip: true; layer.enabled: true; layer.smooth: true
             Shape {
                 id: wave; objectName: "seekWave"
                 width: track.width+28; height: track.height

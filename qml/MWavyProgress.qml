@@ -83,7 +83,15 @@ Item {
         id: run
         objectName: "wavyRun"
         x: indicator.runStart*parent.width
-        width: Math.max(0, (indicator.runEnd-indicator.runStart)*parent.width)
+        // A determinate run's width steps in 8px increments: the layer's
+        // buffer is this item's size, and a run that grew by a pixel every
+        // progress tick was reallocating it for the whole download. The
+        // indeterminate run keeps its exact width - it is animated every
+        // frame anyway, and a stepped travel would read as stutter.
+        width: {
+            const raw = Math.max(0, (indicator.runEnd-indicator.runStart)*parent.width)
+            return indicator.determinate ? Math.round(raw/8)*8 : raw
+        }
         height: parent.height
         // Layering the clip is what actually holds the wave inside the run;
         // the seek bar cuts its own wave the same way.

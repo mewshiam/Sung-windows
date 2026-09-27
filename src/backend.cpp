@@ -190,6 +190,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
   m_saveTimer.setInterval(600);
   connect(&m_saveTimer, &QTimer::timeout, this, &Backend::saveInBackground);
   m_saver.setMaxThreadCount(1);
+  m_loader.setMaxThreadCount(1);
   m_sleepFadeStart.setSingleShot(true);
   m_sleepFadeTick.setInterval(100);
   connect(&m_sleepFadeStart,&QTimer::timeout,this,[this]{updateSleepGain();m_sleepFadeTick.start();});
@@ -334,6 +335,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 Backend::~Backend() {
   m_notifier.clear();
   m_discord.clear();
+  // A parse still under way must not reach for an object being torn down.
+  m_loader.waitForDone(10000);
   storeResumePosition();
   storeMeasuredLoudness();
   save();
@@ -1645,13 +1648,32 @@ void Backend::localTestSource(const QUrl &url) {
 }
 
 void Backend::load() {
-  QFile f(dataPath() + "/library.json");
-  if (!f.open(QIODevice::ReadOnly))
+  // Turning a large library's JSON into QVariant structures is the biggest
+  // single piece of work at startup - hundreds of milliseconds on 10,000
+  // songs, all of it once on the thread that draws the first frame. The file
+  // is read and parsed on a worker instead, and the finished document is
+  // handed back; every value in it is implicitly shared, so the handover is
+  // a pointer swap. The path is resolved here, on the GUI thread: the
+  // settings object and the platform paths are not for other threads.
+  const QString path = dataPath() + "/library.json";
+  m_loader.start([this, path] {
+    QJsonParseError parse;
+    QVariantMap d;
+    QFile f(path);
+    if (f.open(QIODevice::ReadOnly)) {
+      const auto document = QJsonDocument::fromJson(f.readAll(), &parse);
+      if (parse.error != QJsonParseError::NoError || !document.isObject())
+        d.insert("_unreadable", true);
+      else
+        d = librarydata::read(document.object());
+    }
+    QMetaObject::invokeMethod(this, [this, d = std::move(d)] { applyLibrary(d); }, Qt::QueuedConnection);
+  });
+}
+void Backend::applyLibrary(const QVariantMap &d) {
+  if (d.value("_unreadable").toBool()) {m_storageHealthy=false;notifyError("Your saved library could not be read. The original file has been preserved.");return;}
+  if (d.isEmpty())
     return;
-  QJsonParseError parse;
-  const auto document=QJsonDocument::fromJson(f.readAll(),&parse);
-  if(parse.error!=QJsonParseError::NoError || !document.isObject()) {m_storageHealthy=false;notifyError("Your saved library could not be read. The original file has been preserved.");return;}
-  auto d = librarydata::read(document.object());
   m_localTracks=playable(d.value("localTracks").toList());
   m_musicFolders=d.value("musicFolders").toStringList().mid(0,64);
   m_favorites = d.value("favorites").toList();
@@ -1674,6 +1696,10 @@ void Backend::load() {
   m_queue.assign(playable(d.value("queue").toList()));
   m_index = qBound(-1, d.value("index", -1).toInt(), m_queue.count() - 1);
   m_savedPosition=qMax<qint64>(0,d.value("position").toLongLong());
+  emit libraryChanged();
+  // The parse built a document several times the file's size and dropped all
+  // of it coming back; the freed pages belong to the system again now.
+  returnFreedMemory();
 }
 QVariantMap Backend::libraryDocument() const {
   return {{"musicFolders",m_musicFolders},{"localTracks",m_localTracks},{"favorites", m_favorites},

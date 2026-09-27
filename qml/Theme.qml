@@ -16,7 +16,18 @@ QtObject {
     property string activeKind: "default"
     property var seedSteps: []
     property var schemeSteps: []
-    property real seedProgress: 1
+    // The transition's raw driver. The animation writes this; everything
+    // downstream reads the quantized seedProgress beside it.
+    property real rawSeedProgress: 1
+    // Every colour role in the application re-evaluates when seedProgress
+    // moves, and each of those re-evaluations was two OKLCH conversions per
+    // call - so a transition that wrote the raw value every frame re-bound
+    // the whole palette around it, dozens of times a second. The value is
+    // stepped to thirteen stops instead: the same sweep, read as one, and
+    // the re-binds fall by roughly the frame count of the animation. The
+    // steps are dense enough that no hue shift can be told from the smooth
+    // sweep it replaces.
+    readonly property real seedProgress: seedSteps.length>1 ? Math.round(rawSeedProgress*12)/12 : rawSeedProgress
     readonly property int seedIndex: Math.min(seedSteps.length - 1, Math.max(0, Math.round(seedProgress * (seedSteps.length - 1))))
     readonly property color effectiveSeed: seedSteps.length ? pathColor(seedSteps,seedProgress) : defaultSeed
     readonly property bool desktopPalette: followDesktop && activeKind === "desktop"
@@ -39,7 +50,7 @@ QtObject {
     // only interpolates cached colours. Oklch's published D65
     // matrices come from bottosson.github.io/posts/oklab/#converting-from-linear-srgb-to-oklab.
     property NumberAnimation seedMotion: NumberAnimation {
-        target: theme; property: "seedProgress"
+        target: theme; property: "rawSeedProgress"
         // Qt NumberAnimation.to is required for a standalone animation;
         // otherwise start() has no requested endpoint.
         from: 0; to: 1
@@ -128,7 +139,7 @@ QtObject {
         seedMotion.stop()
         activeKind=kind
         seedSteps=app.motion && seedSteps.length ? perceptualSteps(from,seed) : [seed]
-        seedProgress=app.motion && seedSteps.length>1 ? 0 : 1
+        rawSeedProgress=app.motion && seedSteps.length>1 ? 0 : 1
         refreshSchemes()
         if(app.motion && seedSteps.length>1)seedMotion.start()
     }
@@ -154,10 +165,18 @@ QtObject {
     function role(name,fallback) {
         if(!schemeSteps.length)return fallback
         if(schemeSteps.length===1)return schemeSteps[0][name]===undefined?fallback:schemeSteps[0][name]
+        // The ends are the steady state - everything outside the brief
+        // transition reads here - and a role at either end is one of the
+        // scheme's own colours, not an interpolation of two. Taking it
+        // directly skips the OKLCH pair entirely, which is most calls most
+        // of the time.
+        if(rawSeedProgress<=0)return schemeSteps[0][name]===undefined?fallback:schemeSteps[0][name]
+        if(rawSeedProgress>=1){const end=schemeSteps[schemeSteps.length-1];return end[name]===undefined?fallback:end[name]}
         const position=Math.max(0,Math.min(schemeSteps.length-1,seedProgress*(schemeSteps.length-1)))
         const first=Math.floor(position),last=Math.min(schemeSteps.length-1,first+1)
         const a=schemeSteps[first][name],b=schemeSteps[last][name]
         if(a===undefined||b===undefined)return fallback
+        if(first===last)return a
         return perceptualColor(a,b,position-first)
     }
     function blend(a,b,t) {return Qt.rgba(a.r+(b.r-a.r)*t,a.g+(b.g-a.g)*t,a.b+(b.b-a.b)*t,1);}

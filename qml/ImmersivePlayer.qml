@@ -17,8 +17,12 @@ Item {
     // The visualizer needs nothing from the song but its sound, so it is
     // always available.
     // Motion needs nothing from the song either: without an animated cover
-    // it shows the still one the same way.
-    readonly property string effectiveLayout: preferredLayout==="visualizer" || preferredLayout==="motion" ? preferredLayout
+    // it shows the still one the same way. Performance mode stands both
+    // heavy layouts down - the visualizer's ring and Motion's full-bleed
+    // cover are the two most expensive things the interface draws - and the
+    // layouts fall back to the plain artwork one. The washes keep their
+    // pulse, which is the whole show at a cost an integrated GPU meets.
+    readonly property string effectiveLayout: (preferredLayout==="visualizer" || preferredLayout==="motion") && !app.performanceMode ? preferredLayout
         : preferredLayout==="singalong" ? (hasTimedLyrics?"singalong":"artwork")
         : hasLyrics && ["split","lyrics"].indexOf(preferredLayout)>=0 ? preferredLayout : "artwork"
     // The artwork and the visualizer both give the cover the screen; the
@@ -199,7 +203,7 @@ Item {
     }
     Behavior on detailsOpacity { NumberAnimation { objectName: "immersiveDetailFadeMotion"; duration: Theme.springFastEffectsMs; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.springFastEffects } }
     NumberAnimation on opacity { from: 0; to: 1; duration: Theme.normal; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.effectsCurve }
-    AmbientBackdrop { anchors.fill: parent; url: app.current.art || ""; allowed: !player.motionLayout }
+    AmbientBackdrop { anchors.fill: parent; url: app.current.art || ""; allowed: !player.motionLayout && !app.performanceMode }
     MotionScene {
         anchors.fill: parent
         shown: player.motionLayout
