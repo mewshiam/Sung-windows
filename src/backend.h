@@ -468,7 +468,17 @@ public:
   // lookup alike. Empty means connect directly.
   Q_PROPERTY(QString proxyUrl READ proxyUrl WRITE setProxyUrl NOTIFY settingsChanged)
   QString proxyUrl() const {return m_settings.value("network/proxy").toString();}
-  void setProxyUrl(const QString &url) {const QString trimmed=url.trimmed();if(proxyUrl()==trimmed)return;m_settings.setValue("network/proxy",trimmed);emit settingsChanged();}
+  void setProxyUrl(const QString &url) {
+    const QString trimmed=url.trimmed();if(proxyUrl()==trimmed)return;
+    m_settings.setValue("network/proxy",trimmed);
+    // The network path just changed: the videos remembered to have no still
+    // cover are asked about again through it, and an animated lookup that had
+    // given up gets another go.
+    for(auto it=m_videoCovers.begin();it!=m_videoCovers.end();)
+      if(it.value().toString().isEmpty())it=m_videoCovers.erase(it);else ++it;
+    m_settings.setValue("videoCovers",m_videoCovers);
+    refetchMotionArt();emit settingsChanged();emit videoCoversChanged();
+  }
   // Community timings for what is an advert and what is not, sent to
   // sponsor.ajay.app under the track's video ID when this is on.
   Q_PROPERTY(bool sponsorBlock READ sponsorBlock WRITE setSponsorBlock NOTIFY settingsChanged)

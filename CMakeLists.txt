@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Sung VERSION 0.1.2 LANGUAGES CXX)
+project(Sung VERSION 0.1.3 LANGUAGES CXX)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
   # Sung ships for Windows as a portable zip packaged by
   # .github/workflows/windows.yml. Other hosts configure only so the tests

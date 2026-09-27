@@ -245,8 +245,14 @@ private slots:
     b.playItem(song);QTRY_VERIFY_WITH_TIMEOUT(!b.onlineMotionArt().isEmpty(),6000);
     QCOMPARE(b.m_onlineArtworkRetries,1);QVERIFY(b.playing());QVERIFY(b.error().isEmpty());
     song["id"]="motion00008";song["videoId"]="motion00008";song["title"]="retry forever";
-    b.playItem(song);QTRY_VERIFY_WITH_TIMEOUT(b.playing(),4000);QTest::qWait(4000);
-    QFile attempts(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)+"/motion-art/attempt-count");QVERIFY(attempts.open(QIODevice::ReadOnly));QCOMPARE(attempts.readAll(),QByteArray("2"));QVERIFY(b.playing());QVERIFY(b.error().isEmpty());
+    b.playItem(song);QTRY_VERIFY_WITH_TIMEOUT(b.playing(),4000);
+    // The lookup gets four goes before the track is given up on, and none
+    // after that.
+    const QString counter=QStandardPaths::writableLocation(QStandardPaths::CacheLocation)+"/motion-art/attempt-count";
+    const auto attempts=[](const QString &path){QFile file(path);return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray();};
+    QTRY_COMPARE_WITH_TIMEOUT(attempts(counter),QByteArray("4"),12000);
+    QTest::qWait(2000);QCOMPARE(attempts(counter),QByteArray("4"));
+    QVERIFY(b.playing());QVERIFY(b.error().isEmpty());
     b.stop();b.clearQueue();b.setAnimatedArtwork(true);
   }
   void measuredAudioBands() {

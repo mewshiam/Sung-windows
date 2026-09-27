@@ -136,7 +136,7 @@ def lyric_fallback(req):
     # An explicit proxy replaces the environment's idea of where to connect.
     try:
         response = requests.get('https://lrclib.net/api/get?' + urlencode(params),
-                                headers={'User-Agent': 'Sung/0.1.2 ( https://github.com/yappologistic/Sung )',
+                                headers={'User-Agent': 'Sung/0.1.3 ( https://github.com/yappologistic/Sung )',
                                          'Accept': 'application/json'},
                                 timeout=8, proxies=proxy_map(req.get('proxy')), stream=True)
     except requests.RequestException:

@@ -20,11 +20,15 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QNetworkReply>
 #include <QNetworkProxy>
+#include <QNetworkProxyFactory>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -50,6 +54,79 @@ static std::shared_ptr<QTemporaryDir> audioDirectory() {
 static QString itemId(const QVariant &v) {
   return v.toMap().value("id").toString();
 }
+
+namespace {
+// Every request the interface itself makes - YouTube's frames for a video,
+// Apple and Cover Art Archive covers, SponsorBlock timings, scrobbles - goes
+// through one proxy factory. A proxy set in the settings is the same one the
+// helpers stream and look up through; with none set, the system's own proxy
+// answers, exactly as before the factory existed.
+class AppProxyFactory final : public QNetworkProxyFactory {
+public:
+  QList<QNetworkProxy> queryProxy(const QNetworkProxyQuery &query) override {
+    const QMutexLocker lock(&m_mutex);
+    if (bypassed(query.peerHostName())) return {QNetworkProxy(QNetworkProxy::NoProxy)};
+    if (m_proxies.isEmpty()) return systemProxyForQuery(query);
+    return m_proxies;
+  }
+  // The same reading of the settings field the helpers use: a scheme-less
+  // address counts as HTTP, and the bare socks:// alias becomes socks5://.
+  void apply(const QString &setting) {
+    QList<QNetworkProxy> proxies;
+    QString normalized = setting.trimmed();
+    if (!normalized.isEmpty()) {
+      if (normalized.startsWith(QStringLiteral("socks://"), Qt::CaseInsensitive))
+        normalized = QStringLiteral("socks5://") + normalized.mid(8);
+      if (!normalized.contains(QStringLiteral("://")))
+        normalized = QStringLiteral("http://") + normalized;
+      const QUrl parsed(normalized, QUrl::StrictMode);
+      const bool socks = parsed.scheme().startsWith(QStringLiteral("socks"), Qt::CaseInsensitive);
+      const quint16 port = static_cast<quint16>(parsed.port(socks ? 1080 : 8080));
+      if (!parsed.host().isEmpty() && port) {
+        QNetworkProxy proxy(socks ? QNetworkProxy::Socks5Proxy : QNetworkProxy::HttpProxy,
+                            parsed.host(), port);
+        if (!parsed.userName().isEmpty()) proxy.setUser(parsed.userName());
+        if (!parsed.password().isEmpty()) proxy.setPassword(parsed.password());
+        proxies.append(proxy);
+      }
+    }
+    const QMutexLocker lock(&m_mutex);
+    m_proxies = std::move(proxies);
+  }
+private:
+  // Local and private addresses stay direct: the interface also talks to the
+  // player's own server, Discord's pipe, and music servers on the LAN, none
+  // of which a proxy out on the internet can carry.
+  static bool bypassed(const QString &host) {
+    if (host.compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0) return true;
+    if (host.endsWith(QStringLiteral(".local"), Qt::CaseInsensitive)
+        || host.endsWith(QStringLiteral(".lan"), Qt::CaseInsensitive)) return true;
+    const QHostAddress address(host);
+    if (address.isNull()) return false;
+    if (address.isLoopback() || address.isLinkLocal() || address.isUniqueLocalUnicast()) return true;
+    bool ok = false;
+    const quint32 v4 = address.toIPv4Address(&ok);
+    if (!ok) return false;
+    return v4 >> 24 == 10 || v4 >> 20 == 0xAC1 || v4 >> 16 == 0xC0A8 || v4 >> 16 == 0xA9FE;
+  }
+  QList<QNetworkProxy> m_proxies;
+  QMutex m_mutex;
+};
+// Registered with Qt once per process (Qt takes ownership and deletes it only
+// when a different factory replaces it), then told about the current setting
+// by whichever Backend is alive. The indirection keeps several backends in
+// one process - what the tests build - from handing Qt the same instance
+// twice.
+AppProxyFactory *appProxyFactory() {
+  static AppProxyFactory *one = nullptr;
+  if (!one) {
+    one = new AppProxyFactory;
+    QNetworkProxyFactory::setApplicationProxyFactory(one);
+  }
+  return one;
+}
+}
+
 Backend::Backend(QObject *parent) : QObject(parent) {
   // Both decks report everything; only the one being heard is listened to.
   const auto eachDeck=[this](const std::function<void(QMediaPlayer *)> &wire){wire(&m_deckA);wire(&m_deckB);};
@@ -221,6 +298,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             emit playbackChanged();
             notifyError("The audio stream was interrupted. Retry to reconnect.","play");
           });});
+  // The interface's own image and lookup requests follow the same proxy the
+  // helpers do; editing the setting rewires the factory at once.
+  appProxyFactory()->apply(proxyUrl());
+  connect(this,&Backend::settingsChanged,this,[this]{appProxyFactory()->apply(proxyUrl());});
   m_onlineArtworkTimer.setSingleShot(true);
   m_onlineArtworkTimer.setTimerType(Qt::PreciseTimer);
   m_onlineArtworkTimer.setInterval(1000);
@@ -2645,7 +2726,9 @@ void Backend::fetchOnlineArtwork() {
   request("motion-artwork",args,[this,generation,root,motionWanted,videoId,large](const QVariantMap &data){
     if(generation!=m_onlineArtworkGeneration || !m_uiActive)return;
     if(motionWanted){m_artworkStatus="No animated cover found";emit onlineArtworkChanged();}
-    if((data.value("status")=="retry" || !data.value("ok").toBool()) && m_onlineArtworkRetries++<1 && playing()){
+    // A lookup through a proxy can hiccup where a direct line would not, so
+    // the answer gets a few goes before the track is given up on.
+    if((data.value("status")=="retry" || !data.value("ok").toBool()) && m_onlineArtworkRetries++<3 && playing()){
       if(motionWanted){m_artworkStatus="Waiting to retry";emit onlineArtworkChanged();}
       m_onlineArtworkAttempted=false;
       m_onlineArtworkTimer.start(qBound(1,data.value("retryAfter",30).toInt(),3600)*1000);
