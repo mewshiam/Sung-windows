@@ -78,7 +78,8 @@ struct SystemTray::Icon {
 
   void remove() {
     if (!added) return;
-    Shell_NotifyIconW(NIM_DELETE, &base());
+    NOTIFYICONDATAW data = base();
+    Shell_NotifyIconW(NIM_DELETE, &data);
     added = false;
   }
 
